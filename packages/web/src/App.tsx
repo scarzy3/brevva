@@ -13,6 +13,7 @@ import TenantDetail from "@/pages/TenantDetail";
 import Leases from "@/pages/Leases";
 import LeaseDetail from "@/pages/LeaseDetail";
 import LeaseBuilder from "@/pages/LeaseBuilder";
+import CreateAddendum from "@/pages/CreateAddendum";
 import Payments from "@/pages/Payments";
 import Transactions from "@/pages/Transactions";
 import Maintenance from "@/pages/Maintenance";
@@ -43,6 +44,7 @@ export default function App() {
         <Route path="leases" element={<Leases />} />
         <Route path="leases/new" element={<LeaseBuilder />} />
         <Route path="leases/:id" element={<LeaseDetail />} />
+        <Route path="leases/:id/addendum" element={<CreateAddendum />} />
         <Route path="payments" element={<Payments />} />
         <Route path="transactions" element={<Transactions />} />
         <Route path="maintenance" element={<Maintenance />} />
