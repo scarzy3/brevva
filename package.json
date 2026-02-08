@@ -1,0 +1,22 @@
+{
+  "name": "brevva",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "api": "npm run dev --workspace=packages/api",
+    "web": "npm run dev --workspace=packages/web",
+    "portal": "npm run dev --workspace=packages/portal",
+    "db:generate": "npm run db:generate --workspace=packages/api",
+    "db:migrate": "npm run db:migrate --workspace=packages/api",
+    "db:push": "npm run db:push --workspace=packages/api",
+    "db:seed": "npm run db:seed --workspace=packages/api",
+    "db:studio": "npm run db:studio --workspace=packages/api",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
