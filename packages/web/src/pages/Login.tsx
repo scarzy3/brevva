@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate, useLocation } from "react-router";
+import { useNavigate, useLocation, Link } from "react-router";
 import { useAuth } from "@/lib/auth";
 import { Building2 } from "lucide-react";
 
@@ -65,6 +65,12 @@ export default function Login() {
           >
             {loading ? "Signing in..." : "Sign in"}
           </button>
+          <p className="mt-4 text-center text-sm text-gray-500">
+            Don't have an account?{" "}
+            <Link to="/register" className="font-medium text-blue-600 hover:underline">
+              Sign Up
+            </Link>
+          </p>
         </form>
       </div>
     </div>

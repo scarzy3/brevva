@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Brevva - Replace Your Property Management Company</title>
+  <meta name="description" content="Everything a PM company does — rent collection, tenant screening, leases, maintenance, accounting — in one platform. Starting at $49/month." />
+  <script src="https://cdn.tailwindcss.com/3.4.1"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: '#1A56DB',
+            'brand-dark': '#1E3A5F',
+            'dark-text': '#1F2937',
+            'light-bg': '#F9FAFB',
+            'light-blue-bg': '#EFF6FF',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    .fade-in {
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 0.7s ease-out, transform 0.7s ease-out;
+    }
+    .fade-in.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .faq-answer {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.35s ease, padding 0.35s ease;
+    }
+    .faq-answer.open {
+      max-height: 400px;
+    }
+    .faq-chevron {
+      transition: transform 0.3s ease;
+    }
+    .faq-chevron.rotated {
+      transform: rotate(180deg);
+    }
+  </style>
+</head>
+<body class="bg-white text-dark-text font-sans antialiased">
+
+  <!-- ===== NAVIGATION ===== -->
+  <nav class="fixed top-0 left-0 right-0 z-50 bg-white/95 backdrop-blur border-b border-gray-100">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <!-- Logo -->
+        <a href="#" class="text-2xl font-bold text-brand">Brevva</a>
+
+        <!-- Desktop Links -->
+        <div class="hidden md:flex items-center space-x-8">
+          <a href="#features" class="text-sm font-medium text-gray-600 hover:text-brand transition-colors">Features</a>
+          <a href="#pricing" class="text-sm font-medium text-gray-600 hover:text-brand transition-colors">Pricing</a>
+          <a href="#faq" class="text-sm font-medium text-gray-600 hover:text-brand transition-colors">FAQ</a>
+        </div>
+
+        <!-- Desktop CTAs -->
+        <div class="hidden md:flex items-center space-x-3">
+          <a href="https://app.brevva.io"
+             class="px-4 py-2 text-sm font-medium text-brand border border-brand rounded-lg hover:bg-blue-50 transition-colors">
+            Log In
+          </a>
+          <a href="https://app.brevva.io/register"
+             class="px-4 py-2 text-sm font-medium text-white bg-brand rounded-lg hover:bg-blue-700 transition-colors">
+            Start Free Trial
+          </a>
+        </div>
+
+        <!-- Mobile Hamburger -->
+        <button id="mobile-menu-btn" class="md:hidden p-2 rounded-md text-gray-600 hover:text-brand focus:outline-none" aria-label="Toggle menu">
+          <svg id="hamburger-icon" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+          <svg id="close-icon" class="w-6 h-6 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Mobile Menu Dropdown -->
+    <div id="mobile-menu" class="hidden md:hidden bg-white border-t border-gray-100">
+      <div class="px-4 py-4 space-y-3">
+        <a href="#features" class="block text-sm font-medium text-gray-600 hover:text-brand transition-colors">Features</a>
+        <a href="#pricing" class="block text-sm font-medium text-gray-600 hover:text-brand transition-colors">Pricing</a>
+        <a href="#faq" class="block text-sm font-medium text-gray-600 hover:text-brand transition-colors">FAQ</a>
+        <hr class="border-gray-200" />
+        <a href="https://app.brevva.io"
+           class="block text-center px-4 py-2 text-sm font-medium text-brand border border-brand rounded-lg hover:bg-blue-50 transition-colors">
+          Log In
+        </a>
+        <a href="https://app.brevva.io/register"
+           class="block text-center px-4 py-2 text-sm font-medium text-white bg-brand rounded-lg hover:bg-blue-700 transition-colors">
+          Start Free Trial
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Spacer for fixed nav -->
+  <div class="h-16"></div>
+
+  <!-- ===== HERO SECTION ===== -->
+  <section class="bg-white">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-20 sm:py-28 text-center">
+      <h1 class="fade-in text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-dark-text leading-tight">
+        Replace your property<br class="hidden sm:inline" /> management company.
+      </h1>
+      <p class="fade-in mt-6 text-lg sm:text-xl text-gray-600 max-w-2xl mx-auto leading-relaxed">
+        Everything a PM company does &mdash; rent collection, tenant screening, leases, maintenance, accounting &mdash; in one platform. Starting at $49/month.
+      </p>
+      <div class="fade-in mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
+        <a href="https://app.brevva.io/register"
+           class="w-full sm:w-auto px-8 py-3.5 text-base font-semibold text-white bg-brand rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/25">
+          Start Free Trial
+        </a>
+        <a href="#pricing"
+           class="w-full sm:w-auto px-8 py-3.5 text-base font-semibold text-brand border-2 border-brand rounded-lg hover:bg-blue-50 transition-colors">
+          See Pricing
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== PROBLEM STATEMENT ===== -->
+  <section class="bg-light-bg">
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-20 text-center">
+      <p class="fade-in text-xl sm:text-2xl font-medium text-dark-text leading-relaxed">
+        You're paying <span class="font-bold">$200&ndash;600/month</span> to a management company, or duct-taping together
+        Venmo + spreadsheets + Zillow + QuickBooks.<br class="hidden sm:inline" />
+        <span class="text-brand font-bold">There's a better way.</span>
+      </p>
+    </div>
+  </section>
+
+  <!-- ===== FEATURE GRID ===== -->
+  <section id="features" class="bg-white">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-24">
+      <div class="text-center mb-14">
+        <h2 class="fade-in text-3xl sm:text-4xl font-bold text-dark-text">Everything you need. Nothing you don't.</h2>
+        <p class="fade-in mt-4 text-lg text-gray-500">One platform to manage your entire rental portfolio.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <!-- Feature 1 -->
+        <div class="fade-in bg-light-bg rounded-xl p-6 hover:shadow-md transition-shadow">
+          <div class="text-3xl mb-4">&#x1F3E0;</div>
+          <h3 class="text-lg font-semibold text-dark-text mb-2">Property &amp; Unit Management</h3>
+          <p class="text-gray-600 text-sm leading-relaxed">Add properties, manage units, track vacancies, and store photos. See your entire portfolio at a glance.</p>
+        </div>
+
+        <!-- Feature 2 -->
+        <div class="fade-in bg-light-bg rounded-xl p-6 hover:shadow-md transition-shadow">
+          <div class="text-3xl mb-4">&#x1F4B0;</div>
+          <h3 class="text-lg font-semibold text-dark-text mb-2">Rent Collection</h3>
+          <p class="text-gray-600 text-sm leading-relaxed">Collect rent via ACH bank transfer at 0.8% capped at $5 &mdash; the lowest fees in the industry. Auto-pay, reminders, and late fee automation included.</p>
+        </div>
+
+        <!-- Feature 3 -->
+        <div class="fade-in bg-light-bg rounded-xl p-6 hover:shadow-md transition-shadow">
+          <div class="text-3xl mb-4">&#x1F4DD;</div>
+          <h3 class="text-lg font-semibold text-dark-text mb-2">Lease E-Signatures</h3>
+          <p class="text-gray-600 text-sm leading-relaxed">Build leases with our template library, send for electronic signature, and store everything digitally. Unlimited signatures, no per-document fees.</p>
+        </div>
+
+        <!-- Feature 4 -->
+        <div class="fade-in bg-light-bg rounded-xl p-6 hover:shadow-md transition-shadow">
+          <div class="text-3xl mb-4">&#x1F50D;</div>
+          <h3 class="text-lg font-semibold text-dark-text mb-2">Tenant Screening</h3>
+          <p class="text-gray-600 text-sm leading-relaxed">TransUnion credit, criminal, and eviction reports. Applicant-paid, with auto-decisioning rules you configure.</p>
+        </div>
+
+        <!-- Feature 5 -->
+        <div class="fade-in bg-light-bg rounded-xl p-6 hover:shadow-md transition-shadow">
+          <div class="text-3xl mb-4">&#x1F527;</div>
+          <h3 class="text-lg font-semibold text-dark-text mb-2">Maintenance Tracking</h3>
+          <p class="text-gray-600 text-sm leading-relaxed">Tenants submit requests with photos. You assign vendors, track status, and log costs &mdash; all from one dashboard.</p>
+        </div>
+
+        <!-- Feature 6 -->
+        <div class="fade-in bg-light-bg rounded-xl p-6 hover:shadow-md transition-shadow">
+          <div class="text-3xl mb-4">&#x1F4C8;</div>
+          <h3 class="text-lg font-semibold text-dark-text mb-2">Schedule E Reports</h3>
+          <p class="text-gray-600 text-sm leading-relaxed">Every transaction auto-categorized to IRS Schedule E line items. One-click export at tax time. Your CPA will thank you.</p>
+        </div>
+
+        <!-- Feature 7 -->
+        <div class="fade-in bg-light-bg rounded-xl p-6 hover:shadow-md transition-shadow">
+          <div class="text-3xl mb-4">&#x1F4F1;</div>
+          <h3 class="text-lg font-semibold text-dark-text mb-2">Tenant Portal</h3>
+          <p class="text-gray-600 text-sm leading-relaxed">Tenants pay rent, submit maintenance requests, and message you from their phone. Less texting, fewer calls.</p>
+        </div>
+
+        <!-- Feature 8 -->
+        <div class="fade-in bg-light-bg rounded-xl p-6 hover:shadow-md transition-shadow">
+          <div class="text-3xl mb-4">&#x1F4CA;</div>
+          <h3 class="text-lg font-semibold text-dark-text mb-2">Financial Dashboard</h3>
+          <p class="text-gray-600 text-sm leading-relaxed">P&amp;L, cash flow, rent roll, and vacancy tracking across your entire portfolio. Real-time, not a monthly spreadsheet update.</p>
+        </div>
+
+        <!-- Feature 9 -->
+        <div class="fade-in bg-light-bg rounded-xl p-6 hover:shadow-md transition-shadow">
+          <div class="text-3xl mb-4">&#x2709;&#xFE0F;</div>
+          <h3 class="text-lg font-semibold text-dark-text mb-2">Automated Notifications</h3>
+          <p class="text-gray-600 text-sm leading-relaxed">Payment receipts, rent reminders, maintenance updates, and lease notifications &mdash; all sent automatically via email.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== SAVINGS CALCULATOR ===== -->
+  <section class="bg-light-blue-bg">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-24">
+      <div class="text-center mb-12">
+        <h2 class="fade-in text-3xl sm:text-4xl font-bold text-dark-text">See how much you'll save.</h2>
+        <p class="fade-in mt-4 text-lg text-gray-500">Compared to a traditional 8% property management company.</p>
+      </div>
+
+      <div class="fade-in overflow-x-auto">
+        <table class="w-full bg-white rounded-xl shadow-sm overflow-hidden">
+          <thead>
+            <tr class="bg-brand text-white">
+              <th class="px-4 sm:px-6 py-4 text-left text-sm font-semibold">Portfolio</th>
+              <th class="px-4 sm:px-6 py-4 text-left text-sm font-semibold">PM Company Cost (8%)</th>
+              <th class="px-4 sm:px-6 py-4 text-left text-sm font-semibold">Brevva Cost</th>
+              <th class="px-4 sm:px-6 py-4 text-left text-sm font-semibold">You Save</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            <tr class="hover:bg-gray-50 transition-colors">
+              <td class="px-4 sm:px-6 py-4 text-sm text-gray-700 font-medium">5 units &times; $1,200/mo</td>
+              <td class="px-4 sm:px-6 py-4 text-sm text-gray-600">$5,760/year</td>
+              <td class="px-4 sm:px-6 py-4 text-sm text-gray-600">$588/year <span class="text-xs text-brand font-medium">(Starter)</span></td>
+              <td class="px-4 sm:px-6 py-4 text-sm font-bold text-green-600">$5,172/year</td>
+            </tr>
+            <tr class="hover:bg-gray-50 transition-colors">
+              <td class="px-4 sm:px-6 py-4 text-sm text-gray-700 font-medium">10 units &times; $1,500/mo</td>
+              <td class="px-4 sm:px-6 py-4 text-sm text-gray-600">$14,400/year</td>
+              <td class="px-4 sm:px-6 py-4 text-sm text-gray-600">$1,188/year <span class="text-xs text-brand font-medium">(Pro)</span></td>
+              <td class="px-4 sm:px-6 py-4 text-sm font-bold text-green-600">$13,212/year</td>
+            </tr>
+            <tr class="hover:bg-gray-50 transition-colors">
+              <td class="px-4 sm:px-6 py-4 text-sm text-gray-700 font-medium">20 units &times; $1,500/mo</td>
+              <td class="px-4 sm:px-6 py-4 text-sm text-gray-600">$28,800/year</td>
+              <td class="px-4 sm:px-6 py-4 text-sm text-gray-600">$1,188/year <span class="text-xs text-brand font-medium">(Pro)</span></td>
+              <td class="px-4 sm:px-6 py-4 text-sm font-bold text-green-600">$27,612/year</td>
+            </tr>
+            <tr class="hover:bg-gray-50 transition-colors">
+              <td class="px-4 sm:px-6 py-4 text-sm text-gray-700 font-medium">50 units &times; $1,500/mo</td>
+              <td class="px-4 sm:px-6 py-4 text-sm text-gray-600">$72,000/year</td>
+              <td class="px-4 sm:px-6 py-4 text-sm text-gray-600">$1,788/year <span class="text-xs text-brand font-medium">(Enterprise)</span></td>
+              <td class="px-4 sm:px-6 py-4 text-sm font-bold text-green-600">$70,212/year</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="fade-in mt-6 text-center text-sm text-gray-500">
+        ACH rent collection: 0.8% per transaction, capped at $5.
+      </p>
+    </div>
+  </section>
+
+  <!-- ===== PRICING SECTION ===== -->
+  <section id="pricing" class="bg-white">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-24">
+      <div class="text-center mb-14">
+        <h2 class="fade-in text-3xl sm:text-4xl font-bold text-dark-text">Simple, transparent pricing.</h2>
+        <p class="fade-in mt-4 text-lg text-gray-500">No hidden fees. No percentage of rent. Cancel anytime.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
+        <!-- Starter -->
+        <div class="fade-in bg-white border border-gray-200 rounded-2xl p-8 hover:shadow-lg transition-shadow flex flex-col">
+          <div>
+            <h3 class="text-xl font-bold text-dark-text">Starter</h3>
+            <div class="mt-4">
+              <span class="text-4xl font-extrabold text-dark-text">$49</span>
+              <span class="text-gray-500">/mo</span>
+            </div>
+            <p class="mt-1 text-sm text-brand font-medium">$39/mo billed annually</p>
+            <p class="mt-4 text-sm text-gray-500">1&ndash;5 units &middot; Up to 3 properties &middot; 1 team member</p>
+          </div>
+
+          <ul class="mt-8 space-y-3 flex-1">
+            <li class="flex items-start gap-3 text-sm text-gray-600">
+              <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              ACH rent collection (0.8% capped $5)
+            </li>
+            <li class="flex items-start gap-3 text-sm text-gray-600">
+              <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              Lease e-signatures (unlimited)
+            </li>
+            <li class="flex items-start gap-3 text-sm text-gray-600">
+              <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              Tenant screening (tenant-paid)
+            </li>
+            <li class="flex items-start gap-3 text-sm text-gray-600">
+              <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              Maintenance tracking
+            </li>
+            <li class="flex items-start gap-3 text-sm text-gray-600">
+              <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              Schedule E tax reports
+            </li>
+            <li class="flex items-start gap-3 text-sm text-gray-600">
+              <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              Tenant portal
+            </li>
+            <li class="flex items-start gap-3 text-sm text-gray-600">
+              <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              Financial reports
+            </li>
+          </ul>
+
+          <a href="https://app.brevva.io/register"
+             class="mt-8 block text-center px-6 py-3 text-sm font-semibold text-brand border-2 border-brand rounded-lg hover:bg-blue-50 transition-colors">
+            Start Free Trial
+          </a>
+        </div>
+
+        <!-- Pro (Most Popular) -->
+        <div class="fade-in bg-white border-2 border-brand rounded-2xl p-8 shadow-lg shadow-blue-500/10 relative flex flex-col">
+          <div class="absolute -top-4 left-1/2 -translate-x-1/2">
+            <span class="bg-brand text-white text-xs font-bold px-4 py-1.5 rounded-full uppercase tracking-wide">Most Popular</span>
+          </div>
+
+          <div>
+            <h3 class="text-xl font-bold text-dark-text">Pro</h3>
+            <div class="mt-4">
+              <span class="text-4xl font-extrabold text-dark-text">$99</span>
+              <span class="text-gray-500">/mo</span>
+            </div>
+            <p class="mt-1 text-sm text-brand font-medium">$79/mo billed annually</p>
+            <p class="mt-4 text-sm text-gray-500">6&ndash;50 units &middot; Unlimited properties &middot; Up to 5 team members</p>
+          </div>
+
+          <ul class="mt-8 space-y-3 flex-1">
+            <li class="flex items-start gap-3 text-sm text-gray-600">
+              <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              Everything in Starter
+            </li>
+            <li class="flex items-start gap-3 text-sm text-gray-600">
+              <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              Full listing syndication (Zillow, Trulia, etc.)
+            </li>
+            <li class="flex items-start gap-3 text-sm text-gray-600">
+              <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              Custom website + domain
+            </li>
+            <li class="flex items-start gap-3 text-sm text-gray-600">
+              <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              Business phone (Twilio)
+            </li>
+            <li class="flex items-start gap-3 text-sm text-gray-600">
+              <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              Full AI suite
+            </li>
+            <li class="flex items-start gap-3 text-sm text-gray-600">
+              <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              Priority support
+            </li>
+          </ul>
+
+          <a href="https://app.brevva.io/register"
+             class="mt-8 block text-center px-6 py-3 text-sm font-semibold text-white bg-brand rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/25">
+            Start Free Trial
+          </a>
+        </div>
+
+        <!-- Enterprise -->
+        <div class="fade-in bg-white border border-gray-200 rounded-2xl p-8 hover:shadow-lg transition-shadow flex flex-col">
+          <div>
+            <h3 class="text-xl font-bold text-dark-text">Enterprise</h3>
+            <div class="mt-4">
+              <span class="text-4xl font-extrabold text-dark-text">$149</span>
+              <span class="text-gray-500">/mo</span>
+            </div>
+            <p class="mt-1 text-sm text-brand font-medium">$119/mo billed annually</p>
+            <p class="mt-4 text-sm text-gray-500">51&ndash;200+ units &middot; Unlimited everything &middot; Unlimited team members</p>
+          </div>
+
+          <ul class="mt-8 space-y-3 flex-1">
+            <li class="flex items-start gap-3 text-sm text-gray-600">
+              <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              Everything in Pro
+            </li>
+            <li class="flex items-start gap-3 text-sm text-gray-600">
+              <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              White-label website
+            </li>
+            <li class="flex items-start gap-3 text-sm text-gray-600">
+              <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              Multi-line business phone
+            </li>
+            <li class="flex items-start gap-3 text-sm text-gray-600">
+              <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              API access
+            </li>
+            <li class="flex items-start gap-3 text-sm text-gray-600">
+              <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              Dedicated CSM
+            </li>
+          </ul>
+
+          <a href="https://app.brevva.io/register"
+             class="mt-8 block text-center px-6 py-3 text-sm font-semibold text-brand border-2 border-brand rounded-lg hover:bg-blue-50 transition-colors">
+            Start Free Trial
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== ACH PRICING TRANSPARENCY ===== -->
+  <section class="bg-light-bg">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-20">
+      <div class="text-center mb-10">
+        <h2 class="fade-in text-3xl sm:text-4xl font-bold text-dark-text">Payment processing, demystified.</h2>
+      </div>
+
+      <div class="fade-in grid grid-cols-1 sm:grid-cols-3 gap-6">
+        <!-- ACH -->
+        <div class="bg-white rounded-xl p-6 text-center shadow-sm">
+          <p class="text-sm font-semibold text-brand uppercase tracking-wide mb-2">ACH Bank Transfer</p>
+          <p class="text-3xl font-extrabold text-dark-text">0.8%</p>
+          <p class="text-sm text-gray-500 mt-1">capped at $5</p>
+          <hr class="my-4 border-gray-100" />
+          <p class="text-sm text-gray-600">On $1,500 rent = <span class="font-bold">$5</span></p>
+          <p class="text-sm text-gray-600">On $2,500 rent = <span class="font-bold">still $5</span></p>
+        </div>
+
+        <!-- Card -->
+        <div class="bg-white rounded-xl p-6 text-center shadow-sm">
+          <p class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">Credit/Debit Card</p>
+          <p class="text-3xl font-extrabold text-dark-text">2.9% + $0.30</p>
+          <p class="text-sm text-gray-500 mt-1">optional, tenant-paid</p>
+          <hr class="my-4 border-gray-100" />
+          <p class="text-sm text-gray-600">Tenants choose to pay by card</p>
+          <p class="text-sm text-gray-600">Fee passed to tenant, not you</p>
+        </div>
+
+        <!-- Compare -->
+        <div class="bg-white rounded-xl p-6 text-center shadow-sm">
+          <p class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">The Competition</p>
+          <p class="text-sm text-gray-600 mt-4">Buildium: <span class="font-semibold">$1.50/ACH</span></p>
+          <p class="text-sm text-gray-600 mt-2">RentRedi/TurboTenant: <span class="font-semibold">fees passed to tenants</span></p>
+          <hr class="my-4 border-gray-100" />
+          <p class="text-sm text-brand font-semibold">Brevva: lowest landlord cost</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== FAQ SECTION ===== -->
+  <section id="faq" class="bg-white">
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-24">
+      <div class="text-center mb-14">
+        <h2 class="fade-in text-3xl sm:text-4xl font-bold text-dark-text">Frequently asked questions</h2>
+      </div>
+
+      <div class="fade-in space-y-4" id="faq-list">
+        <!-- FAQ 1 -->
+        <div class="border border-gray-200 rounded-xl overflow-hidden">
+          <button class="faq-toggle w-full flex items-center justify-between px-6 py-5 text-left hover:bg-gray-50 transition-colors" aria-expanded="false">
+            <span class="text-base font-medium text-dark-text">Is there a free trial?</span>
+            <svg class="faq-chevron w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          <div class="faq-answer px-6">
+            <p class="pb-5 text-sm text-gray-600 leading-relaxed">Yes, 14 days, no credit card required. Full access to all features on your selected plan.</p>
+          </div>
+        </div>
+
+        <!-- FAQ 2 -->
+        <div class="border border-gray-200 rounded-xl overflow-hidden">
+          <button class="faq-toggle w-full flex items-center justify-between px-6 py-5 text-left hover:bg-gray-50 transition-colors" aria-expanded="false">
+            <span class="text-base font-medium text-dark-text">Can I switch plans?</span>
+            <svg class="faq-chevron w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          <div class="faq-answer px-6">
+            <p class="pb-5 text-sm text-gray-600 leading-relaxed">Yes, upgrade or downgrade anytime. Changes are prorated so you only pay for what you use.</p>
+          </div>
+        </div>
+
+        <!-- FAQ 3 -->
+        <div class="border border-gray-200 rounded-xl overflow-hidden">
+          <button class="faq-toggle w-full flex items-center justify-between px-6 py-5 text-left hover:bg-gray-50 transition-colors" aria-expanded="false">
+            <span class="text-base font-medium text-dark-text">What happens if I cancel?</span>
+            <svg class="faq-chevron w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          <div class="faq-answer px-6">
+            <p class="pb-5 text-sm text-gray-600 leading-relaxed">Your data stays accessible for 30 days after cancellation. You can export everything as CSV or PDF before it's removed.</p>
+          </div>
+        </div>
+
+        <!-- FAQ 4 -->
+        <div class="border border-gray-200 rounded-xl overflow-hidden">
+          <button class="faq-toggle w-full flex items-center justify-between px-6 py-5 text-left hover:bg-gray-50 transition-colors" aria-expanded="false">
+            <span class="text-base font-medium text-dark-text">Do tenants pay to use the portal?</span>
+            <svg class="faq-chevron w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          <div class="faq-answer px-6">
+            <p class="pb-5 text-sm text-gray-600 leading-relaxed">No, the tenant portal is completely free for tenants. They can pay rent, submit maintenance requests, and communicate with you at no cost.</p>
+          </div>
+        </div>
+
+        <!-- FAQ 5 -->
+        <div class="border border-gray-200 rounded-xl overflow-hidden">
+          <button class="faq-toggle w-full flex items-center justify-between px-6 py-5 text-left hover:bg-gray-50 transition-colors" aria-expanded="false">
+            <span class="text-base font-medium text-dark-text">Who pays the screening fee?</span>
+            <svg class="faq-chevron w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          <div class="faq-answer px-6">
+            <p class="pb-5 text-sm text-gray-600 leading-relaxed">The applicant pays TransUnion directly ($35&ndash;45). There is no cost to you as the landlord.</p>
+          </div>
+        </div>
+
+        <!-- FAQ 6 -->
+        <div class="border border-gray-200 rounded-xl overflow-hidden">
+          <button class="faq-toggle w-full flex items-center justify-between px-6 py-5 text-left hover:bg-gray-50 transition-colors" aria-expanded="false">
+            <span class="text-base font-medium text-dark-text">Annual discount?</span>
+            <svg class="faq-chevron w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          <div class="faq-answer px-6">
+            <p class="pb-5 text-sm text-gray-600 leading-relaxed">Yes, save 20% when you choose annual billing. The discount is applied automatically at checkout.</p>
+          </div>
+        </div>
+
+        <!-- FAQ 7 -->
+        <div class="border border-gray-200 rounded-xl overflow-hidden">
+          <button class="faq-toggle w-full flex items-center justify-between px-6 py-5 text-left hover:bg-gray-50 transition-colors" aria-expanded="false">
+            <span class="text-base font-medium text-dark-text">Is my data secure?</span>
+            <svg class="faq-chevron w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          <div class="faq-answer px-6">
+            <p class="pb-5 text-sm text-gray-600 leading-relaxed">Absolutely. We use AES-256 encryption at rest and TLS 1.3 in transit. All payment processing is handled securely by Stripe.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== FINAL CTA ===== -->
+  <section class="bg-[#1E3A5F]">
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-20 sm:py-28 text-center">
+      <h2 class="fade-in text-3xl sm:text-4xl font-bold text-white">Ready to fire your property manager?</h2>
+      <p class="fade-in mt-4 text-lg text-blue-200">Start your 14-day free trial. No credit card required.</p>
+      <div class="fade-in mt-10">
+        <a href="https://app.brevva.io/register"
+           class="inline-block px-10 py-4 text-lg font-semibold text-[#1E3A5F] bg-white rounded-lg hover:bg-gray-100 transition-colors shadow-lg">
+          Start Free Trial
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== FOOTER ===== -->
+  <footer class="bg-gray-900">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-8">
+        <div>
+          <a href="#" class="text-2xl font-bold text-white">Brevva</a>
+          <p class="mt-2 text-sm text-gray-400">The all-in-one landlord management platform.</p>
+        </div>
+
+        <div class="flex flex-wrap gap-6 text-sm">
+          <a href="#features" class="text-gray-400 hover:text-white transition-colors">Features</a>
+          <a href="#pricing" class="text-gray-400 hover:text-white transition-colors">Pricing</a>
+          <a href="#faq" class="text-gray-400 hover:text-white transition-colors">FAQ</a>
+          <a href="#" class="text-gray-400 hover:text-white transition-colors">Privacy Policy</a>
+          <a href="#" class="text-gray-400 hover:text-white transition-colors">Terms of Service</a>
+        </div>
+      </div>
+
+      <div class="mt-10 pt-8 border-t border-gray-800">
+        <p class="text-sm text-gray-500 text-center">&copy; 2026 Brevva. All rights reserved.</p>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ===== JAVASCRIPT ===== -->
+  <script>
+    // Mobile menu toggle
+    (function () {
+      const btn = document.getElementById('mobile-menu-btn');
+      const menu = document.getElementById('mobile-menu');
+      const hamburger = document.getElementById('hamburger-icon');
+      const closeIcon = document.getElementById('close-icon');
+
+      btn.addEventListener('click', function () {
+        const isOpen = !menu.classList.contains('hidden');
+        menu.classList.toggle('hidden');
+        hamburger.classList.toggle('hidden');
+        closeIcon.classList.toggle('hidden');
+        btn.setAttribute('aria-expanded', !isOpen);
+      });
+
+      // Close mobile menu when a link is clicked
+      menu.querySelectorAll('a').forEach(function (link) {
+        link.addEventListener('click', function () {
+          menu.classList.add('hidden');
+          hamburger.classList.remove('hidden');
+          closeIcon.classList.add('hidden');
+          btn.setAttribute('aria-expanded', 'false');
+        });
+      });
+    })();
+
+    // FAQ accordion
+    (function () {
+      document.querySelectorAll('.faq-toggle').forEach(function (button) {
+        button.addEventListener('click', function () {
+          const answer = this.nextElementSibling;
+          const chevron = this.querySelector('.faq-chevron');
+          const isOpen = answer.classList.contains('open');
+
+          // Close all others
+          document.querySelectorAll('.faq-answer.open').forEach(function (el) {
+            el.classList.remove('open');
+          });
+          document.querySelectorAll('.faq-chevron.rotated').forEach(function (el) {
+            el.classList.remove('rotated');
+          });
+          document.querySelectorAll('.faq-toggle').forEach(function (el) {
+            el.setAttribute('aria-expanded', 'false');
+          });
+
+          // Toggle current
+          if (!isOpen) {
+            answer.classList.add('open');
+            chevron.classList.add('rotated');
+            this.setAttribute('aria-expanded', 'true');
+          }
+        });
+      });
+    })();
+
+    // Fade-in on scroll with IntersectionObserver
+    (function () {
+      var elements = document.querySelectorAll('.fade-in');
+
+      if ('IntersectionObserver' in window) {
+        var observer = new IntersectionObserver(function (entries) {
+          entries.forEach(function (entry) {
+            if (entry.isIntersecting) {
+              entry.target.classList.add('visible');
+              observer.unobserve(entry.target);
+            }
+          });
+        }, {
+          threshold: 0.1,
+          rootMargin: '0px 0px -40px 0px'
+        });
+
+        elements.forEach(function (el) {
+          observer.observe(el);
+        });
+      } else {
+        // Fallback: show everything immediately
+        elements.forEach(function (el) {
+          el.classList.add('visible');
+        });
+      }
+    })();
+  </script>
+</body>
+</html>
