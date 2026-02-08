@@ -40,6 +40,9 @@ app.use(
 // ─── 2. Security headers ─────────────────────────────────────────────
 app.use(helmet());
 
+// Trust first proxy (Nginx / Cloudflare) for correct client IP in rate limiter & logs
+app.set("trust proxy", 1);
+
 // ─── 3. Rate limiting ────────────────────────────────────────────────
 const generalLimiter = rateLimit({
   windowMs: 60 * 1000,
