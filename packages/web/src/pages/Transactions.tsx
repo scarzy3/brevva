@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Plus, TrendingUp, TrendingDown } from "lucide-react";
+import CreateTransactionModal from "@/components/CreateTransactionModal";
 
 function currency(n: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
@@ -10,6 +11,7 @@ function currency(n: number) {
 export default function Transactions() {
   const [page, setPage] = useState(1);
   const [type, setType] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["transactions", page, type],
@@ -23,7 +25,10 @@ export default function Transactions() {
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Transactions</h1>
-        <button className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+        <button
+          onClick={() => setShowCreate(true)}
+          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+        >
           <Plus className="h-4 w-4" /> Record Transaction
         </button>
       </div>
@@ -83,6 +88,8 @@ export default function Transactions() {
           <button onClick={() => setPage((p) => p + 1)} disabled={page >= data.pagination.totalPages} className="rounded-lg border px-3 py-1.5 text-sm disabled:opacity-50">Next</button>
         </div>
       )}
+
+      <CreateTransactionModal open={showCreate} onClose={() => setShowCreate(false)} />
     </div>
   );
 }

@@ -84,6 +84,15 @@ services:
       dockerfile: packages/portal/Dockerfile
     restart: unless-stopped
 
+  # ── Landing Page ─────────────────────────────────────────────────────
+  landing:
+    build:
+      context: packages/landing
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8092:80"
+
   # ── Reverse Proxy ─────────────────────────────────────────────────────
   nginx:
     image: nginx:alpine
@@ -97,6 +106,7 @@ services:
       - api
       - web
       - portal
+      - landing
 
 volumes:
   pgdata:

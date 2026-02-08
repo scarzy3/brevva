@@ -2,6 +2,7 @@ import { Routes, Route } from "react-router";
 import Layout from "@/components/Layout";
 import PrivateRoute from "@/components/PrivateRoute";
 import Login from "@/pages/Login";
+import Register from "@/pages/Register";
 import Dashboard from "@/pages/Dashboard";
 import Properties from "@/pages/Properties";
 import PropertyDetail from "@/pages/PropertyDetail";
@@ -21,6 +22,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
       <Route
         element={
           <PrivateRoute>

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Plus } from "lucide-react";
+import CreateMaintenanceModal from "@/components/CreateMaintenanceModal";
 
 const statusColors: Record<string, string> = {
   OPEN: "bg-yellow-100 text-yellow-700",
@@ -21,6 +22,7 @@ const priorityColors: Record<string, string> = {
 export default function Maintenance() {
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["maintenance", page, status],
@@ -34,7 +36,10 @@ export default function Maintenance() {
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Maintenance Requests</h1>
-        <button className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+        <button
+          onClick={() => setShowCreate(true)}
+          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+        >
           <Plus className="h-4 w-4" /> New Request
         </button>
       </div>
@@ -102,6 +107,8 @@ export default function Maintenance() {
           <button onClick={() => setPage((p) => p + 1)} disabled={page >= data.pagination.totalPages} className="rounded-lg border px-3 py-1.5 text-sm disabled:opacity-50">Next</button>
         </div>
       )}
+
+      <CreateMaintenanceModal open={showCreate} onClose={() => setShowCreate(false)} />
     </div>
   );
 }

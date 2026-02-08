@@ -3,10 +3,12 @@ import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Plus, Search, Building2, MapPin } from "lucide-react";
+import CreatePropertyModal from "@/components/CreatePropertyModal";
 
 export default function Properties() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [showCreate, setShowCreate] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["properties", page, search],
@@ -20,12 +22,12 @@ export default function Properties() {
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Properties</h1>
-        <Link
-          to="/properties/new"
+        <button
+          onClick={() => setShowCreate(true)}
           className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
         >
           <Plus className="h-4 w-4" /> Add Property
-        </Link>
+        </button>
       </div>
 
       <div className="mb-4 relative">
@@ -93,6 +95,8 @@ export default function Properties() {
           </button>
         </div>
       )}
+
+      <CreatePropertyModal open={showCreate} onClose={() => setShowCreate(false)} />
     </div>
   );
 }
