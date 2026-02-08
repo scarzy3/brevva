@@ -5,6 +5,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import Modal from "@/components/Modal";
+import AddressAutocomplete from "@/components/AddressAutocomplete";
+import type { AddressResult } from "@/components/AddressAutocomplete";
 
 const schema = z.object({
   name: z.string().min(1, "Name is required").max(200),
@@ -33,11 +35,19 @@ export default function CreatePropertyModal({ open, onClose }: Props) {
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: { type: "SINGLE_FAMILY" },
   });
+
+  const handleAddressSelect = (result: AddressResult) => {
+    setValue("address", result.address, { shouldValidate: true });
+    setValue("city", result.city, { shouldValidate: true });
+    setValue("state", result.state, { shouldValidate: true });
+    setValue("zip", result.zip, { shouldValidate: true });
+  };
 
   const mutation = useMutation({
     mutationFn: (data: FormData) => {
@@ -91,6 +101,15 @@ export default function CreatePropertyModal({ open, onClose }: Props) {
             <option value="COMMERCIAL">Commercial</option>
           </select>
           {errors.type && <p className={errorCls}>{errors.type.message}</p>}
+        </div>
+
+        <div>
+          <label className={labelCls}>Search Address</label>
+          <AddressAutocomplete
+            onAddressSelect={handleAddressSelect}
+            placeholder="Start typing to search..."
+            className={inputCls}
+          />
         </div>
 
         <div>
