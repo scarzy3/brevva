@@ -2,6 +2,7 @@ node_modules
 .next
 dist
 build
+.git
 .env
 .env.local
 .env.*.local
@@ -9,8 +10,9 @@ pgdata
 uploads
 coverage
 *.log
-.git
+npm-debug.log*
 .gitignore
 .vscode
 .idea
+.DS_Store
 *.md

@@ -1,45 +1,49 @@
-# ── Stage 1: Install dependencies ──────────────────────────────────
-FROM node:20-alpine AS deps
+# ── Build stage ───────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install
+# Copy workspace root files
+COPY package.json package-lock.json ./
+COPY packages/api/package.json ./packages/api/
+COPY packages/web/package.json ./packages/web/
+COPY packages/portal/package.json ./packages/portal/
 
-# ── Stage 2: Build ─────────────────────────────────────────────────
-FROM node:20-alpine AS build
-WORKDIR /app
+RUN npm ci
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json tsconfig.json ./
-COPY prisma ./prisma
-COPY src ./src
+# Copy API source + prisma schema
+COPY packages/api/ ./packages/api/
 
-# Generate Prisma client
-RUN npx prisma generate
+# Generate Prisma client and compile TypeScript
+RUN npx prisma generate --schema=packages/api/prisma/schema.prisma
+RUN npm run build --workspace=packages/api
 
-# Compile TypeScript
-RUN npm run build
-
-# ── Stage 3: Production ───────────────────────────────────────────
+# ── Production stage ──────────────────────────────────────────────────
 FROM node:20-alpine AS runner
+
 WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Add non-root user
-RUN addgroup --system --gid 1001 brevva && \
-    adduser --system --uid 1001 brevva
+# Copy workspace root files for production install
+COPY package.json package-lock.json ./
+COPY packages/api/package.json ./packages/api/
+COPY packages/web/package.json ./packages/web/
+COPY packages/portal/package.json ./packages/portal/
 
-# Copy built output and dependencies
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/prisma ./prisma
-COPY package.json ./
+RUN npm ci --omit=dev
+
+# Copy prisma schema and generate client for production
+COPY packages/api/prisma/ ./packages/api/prisma/
+RUN npx prisma generate --schema=packages/api/prisma/schema.prisma
+
+# Copy compiled output from builder
+COPY --from=builder /app/packages/api/dist/ ./packages/api/dist/
 
 # Create uploads directory
-RUN mkdir -p /app/uploads && chown brevva:brevva /app/uploads
+RUN mkdir -p /app/packages/api/uploads
 
-USER brevva
+WORKDIR /app/packages/api
 
 EXPOSE 3000
 

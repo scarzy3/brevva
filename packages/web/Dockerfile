@@ -1,44 +1,35 @@
-# ── Stage 1: Install dependencies ──────────────────────────────────
-FROM node:20-alpine AS deps
+# ── Build stage ───────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install
+# Copy workspace root files
+COPY package.json package-lock.json ./
+COPY packages/api/package.json ./packages/api/
+COPY packages/web/package.json ./packages/web/
+COPY packages/portal/package.json ./packages/portal/
 
-# ── Stage 2: Build ─────────────────────────────────────────────────
-FROM node:20-alpine AS build
-WORKDIR /app
+RUN npm ci
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+# Copy web source
+COPY packages/web/ ./packages/web/
 
-ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build --workspace=packages/web
 
-RUN npm run build
+# ── Serve stage ───────────────────────────────────────────────────────
+FROM nginx:alpine
 
-# ── Stage 3: Production ───────────────────────────────────────────
-FROM node:20-alpine AS runner
-WORKDIR /app
+COPY --from=builder /app/packages/web/dist /usr/share/nginx/html
 
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
+# SPA fallback: serve index.html for all routes
+RUN printf 'server {\n\
+    listen 80;\n\
+    root /usr/share/nginx/html;\n\
+    index index.html;\n\
+\n\
+    location / {\n\
+        try_files $uri $uri/ /index.html;\n\
+    }\n\
+}\n' > /etc/nginx/conf.d/default.conf
 
-RUN addgroup --system --gid 1001 brevva && \
-    adduser --system --uid 1001 brevva
-
-# Copy standalone output — public may be empty so use shell copy
-COPY --from=build /app/.next/standalone ./
-COPY --from=build /app/.next/static ./.next/static
-RUN mkdir -p /app/public
-COPY --from=build /app/public/ ./public/
-
-RUN chown -R brevva:brevva /app
-
-USER brevva
-
-EXPOSE 3001
-
-ENV PORT=3001
-ENV HOSTNAME=0.0.0.0
-
-CMD ["node", "server.js"]
+EXPOSE 80
