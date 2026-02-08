@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate, useLocation } from "react-router";
+import { useNavigate, useLocation, Link } from "react-router";
 import { useAuth } from "@/lib/auth";
 import { Building2 } from "lucide-react";
 
@@ -52,7 +52,15 @@ export default function Login() {
             className="mb-4 w-full rounded-lg border px-3 py-2.5 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-200"
             placeholder="you@example.com"
           />
-          <label className="mb-1 block text-sm font-medium">Password</label>
+          <div className="mb-1 flex items-center justify-between">
+            <label className="block text-sm font-medium">Password</label>
+            <Link
+              to="/forgot-password"
+              className="text-xs text-teal-600 hover:underline"
+            >
+              Forgot password?
+            </Link>
+          </div>
           <input
             type="password"
             required

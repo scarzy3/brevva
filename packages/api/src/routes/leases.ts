@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { createHash, randomUUID } from "crypto";
+import { createHash, randomUUID, randomBytes } from "crypto";
+import bcrypt from "bcryptjs";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../lib/async-handler.js";
@@ -43,6 +44,7 @@ import {
   sendEmail,
   buildSignatureRequestEmail,
   buildLeaseSignedConfirmationEmail,
+  buildWelcomeTenantEmail,
 } from "../services/email.js";
 import { env } from "../config/env.js";
 
@@ -359,6 +361,8 @@ router.post(
         propertyAddress,
         unitNumber: unit.unitNumber,
         allSigned: unsignedCount === 0,
+        portalUrl: env.PORTAL_URL,
+        documentUrl: lease.documentUrl,
       });
       sendEmail({
         to: lt.tenant.email,
@@ -788,7 +792,7 @@ router.post(
         tenants: {
           include: {
             tenant: {
-              select: { id: true, firstName: true, lastName: true, email: true, phone: true },
+              select: { id: true, firstName: true, lastName: true, email: true, phone: true, userId: true },
             },
           },
         },
@@ -806,6 +810,62 @@ router.post(
 
     if (lease.tenants.length === 0) {
       throw new ValidationError("Lease must have at least one tenant");
+    }
+
+    // Auto-create portal accounts for tenants who don't have one
+    const propertyAddr = `${lease.unit.property.address}, ${lease.unit.property.city}, ${lease.unit.property.state}`;
+    for (const lt of lease.tenants) {
+      if (lt.tenant.userId) continue; // already has a User account
+
+      // Check if a user with this email already exists
+      const existingUser = await prisma.user.findUnique({
+        where: { email: lt.tenant.email },
+      });
+      if (existingUser) {
+        // Link the existing user to this tenant
+        await prisma.tenant.update({
+          where: { id: lt.tenant.id },
+          data: { userId: existingUser.id },
+        });
+        continue;
+      }
+
+      // Create a new User account with a placeholder password
+      const tempPasswordHash = await bcrypt.hash(randomBytes(32).toString("hex"), 12);
+      const setupToken = randomBytes(32).toString("hex");
+      const setupExpiry = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours
+
+      const newUser = await prisma.user.create({
+        data: {
+          organizationId: orgId,
+          email: lt.tenant.email,
+          passwordHash: tempPasswordHash,
+          firstName: lt.tenant.firstName,
+          lastName: lt.tenant.lastName,
+          role: "TENANT",
+          phone: lt.tenant.phone,
+          passwordResetToken: setupToken,
+          passwordResetExpires: setupExpiry,
+        },
+      });
+
+      // Link the tenant to the new user
+      await prisma.tenant.update({
+        where: { id: lt.tenant.id },
+        data: { userId: newUser.id },
+      });
+
+      // Send welcome email with setup link
+      const setupUrl = `${env.PORTAL_URL}/reset-password?token=${setupToken}`;
+      const welcomeEmail = buildWelcomeTenantEmail({
+        tenantName: `${lt.tenant.firstName} ${lt.tenant.lastName}`,
+        propertyAddress: propertyAddr,
+        unitNumber: lease.unit.unitNumber,
+        setupUrl,
+        landlordName: lease.organization.name,
+        portalUrl: env.PORTAL_URL,
+      });
+      sendEmail({ to: lt.tenant.email, ...welcomeEmail }).catch(() => {});
     }
 
     // Generate lease document
