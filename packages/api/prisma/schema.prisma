@@ -445,9 +445,13 @@ model Lease {
   lateFeeAmount    Decimal?    @db.Decimal(10, 2)
   lateFeeType      LateFeeType @default(FLAT)
   gracePeriodDays  Int         @default(5)
+  rentDueDay       Int         @default(1)
   status           LeaseStatus @default(DRAFT)
   documentUrl      String?
+  documentHash     String?
   terms            Json?       // Custom clauses
+  landlordSignedAt   DateTime?
+  landlordSignatureData Json?
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
 
@@ -466,12 +470,14 @@ model Lease {
 }
 
 model LeaseTenant {
-  id            String   @id @default(uuid()) @db.Uuid
-  leaseId       String   @db.Uuid
-  tenantId      String   @db.Uuid
-  isPrimary     Boolean  @default(false)
+  id            String    @id @default(uuid()) @db.Uuid
+  leaseId       String    @db.Uuid
+  tenantId      String    @db.Uuid
+  isPrimary     Boolean   @default(false)
   signedAt      DateTime?
-  signatureData Json?    // { ip, userAgent, hash, fullName, email, timestamp }
+  signatureData Json?     // { ip, userAgent, hash, fullName, email, timestamp }
+  signingToken  String?   @unique
+  tokenExpiresAt DateTime?
 
   // Relations
   lease  Lease  @relation(fields: [leaseId], references: [id], onDelete: Cascade)
