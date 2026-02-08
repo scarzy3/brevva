@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
+    "@types/google.maps": "^3.58.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
