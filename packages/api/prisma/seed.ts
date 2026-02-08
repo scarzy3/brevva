@@ -126,7 +126,7 @@ async function main() {
 
   // ─── Owner User ────────────────────────────────────────────────────
 
-  const passwordHash = await bcrypt.hash("demo1234", 12);
+  const passwordHash = await bcrypt.hash("Demo1234!", 12);
 
   const owner = await prisma.user.create({
     data: {
@@ -145,7 +145,7 @@ async function main() {
 
   // ─── Tenant User Accounts ─────────────────────────────────────────
 
-  const tenantPassword = await bcrypt.hash("tenant1234", 12);
+  const tenantPassword = await bcrypt.hash("Tenant1234!", 12);
 
   const tenantUsers = await Promise.all([
     prisma.user.create({
@@ -1271,9 +1271,9 @@ async function main() {
   console.log("\nSeed completed successfully!");
   console.log("\n  Login credentials:");
   console.log("  ─────────────────────────────────────");
-  console.log("  Owner:  demo@brevva.io / demo1234");
-  console.log("  Tenant: sarah.johnson@email.com / tenant1234");
-  console.log("  Tenant: mike.chen@email.com / tenant1234");
+  console.log("  Owner:  demo@brevva.io / Demo1234!");
+  console.log("  Tenant: sarah.johnson@email.com / Tenant1234!");
+  console.log("  Tenant: mike.chen@email.com / Tenant1234!");
   console.log("  ─────────────────────────────────────\n");
 }
 

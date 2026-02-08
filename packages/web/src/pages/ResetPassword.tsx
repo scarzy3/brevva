@@ -1,6 +1,14 @@
-import { useState, type FormEvent } from "react";
+import { useState, useMemo, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router";
-import { Building2, ArrowLeft, CheckCircle, AlertTriangle, Lock, Eye, EyeOff } from "lucide-react";
+import { Building2, ArrowLeft, CheckCircle, AlertTriangle, Lock, Eye, EyeOff, Check, X } from "lucide-react";
+
+const PASSWORD_RULES = [
+  { label: "At least 8 characters", test: (p: string) => p.length >= 8 },
+  { label: "One uppercase letter", test: (p: string) => /[A-Z]/.test(p) },
+  { label: "One lowercase letter", test: (p: string) => /[a-z]/.test(p) },
+  { label: "One number", test: (p: string) => /[0-9]/.test(p) },
+  { label: "One special character", test: (p: string) => /[^A-Za-z0-9]/.test(p) },
+];
 
 export default function ResetPassword() {
   const [searchParams] = useSearchParams();
@@ -13,12 +21,18 @@ export default function ResetPassword() {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState("");
 
+  const ruleResults = useMemo(
+    () => PASSWORD_RULES.map((r) => ({ ...r, passed: r.test(password) })),
+    [password],
+  );
+  const allRulesPassed = ruleResults.every((r) => r.passed);
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError("");
 
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters");
+    if (!allRulesPassed) {
+      setError("Please meet all password requirements");
       return;
     }
     if (password !== confirmPassword) {
@@ -136,6 +150,19 @@ export default function ResetPassword() {
               )}
             </button>
           </div>
+          {password.length > 0 && (
+            <ul className="mb-4 space-y-1">
+              {ruleResults.map((r) => (
+                <li
+                  key={r.label}
+                  className={`flex items-center gap-2 text-xs ${r.passed ? "text-green-600" : "text-gray-400"}`}
+                >
+                  {r.passed ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+                  {r.label}
+                </li>
+              ))}
+            </ul>
+          )}
           <label className="mb-1 block text-sm font-medium">
             Confirm Password
           </label>
@@ -153,7 +180,7 @@ export default function ResetPassword() {
           </div>
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !allRulesPassed || password !== confirmPassword}
             className="w-full rounded-lg bg-blue-600 px-4 py-2.5 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           >
             {loading ? "Saving..." : "Reset Password"}
