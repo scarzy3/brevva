@@ -20,6 +20,8 @@ import maintenanceRoutes from "./routes/maintenance.js";
 import vendorRoutes from "./routes/vendors.js";
 import messageRoutes from "./routes/messages.js";
 import portalRoutes from "./routes/portal.js";
+import dashboardRoutes from "./routes/dashboard.js";
+import reportRoutes from "./routes/reports.js";
 import webhookRoutes from "./routes/webhooks.js";
 
 const app = express();
@@ -100,6 +102,8 @@ app.use("/api/v1/maintenance", maintenanceRoutes);
 app.use("/api/v1/vendors", vendorRoutes);
 app.use("/api/v1/messages", messageRoutes);
 app.use("/api/v1/portal", portalRoutes);
+app.use("/api/v1/dashboard", dashboardRoutes);
+app.use("/api/v1/reports", reportRoutes);
 
 // ─── 9. 404 handler ──────────────────────────────────────────────────
 app.use((_req, res) => {
