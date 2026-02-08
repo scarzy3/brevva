@@ -1,0 +1,16 @@
+node_modules
+.next
+dist
+build
+.env
+.env.local
+.env.*.local
+pgdata
+uploads
+coverage
+*.log
+.git
+.gitignore
+.vscode
+.idea
+*.md
