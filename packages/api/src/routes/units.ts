@@ -13,6 +13,7 @@ import {
   createUnitSchema,
   updateUnitSchema,
   unitListQuerySchema,
+  unitListAllQuerySchema,
   unitParamsSchema,
   unitIdParamSchema,
 } from "../schemas/units.js";
@@ -20,6 +21,7 @@ import type {
   CreateUnitInput,
   UpdateUnitInput,
   UnitListQuery,
+  UnitListAllQuery,
 } from "../schemas/units.js";
 
 // Nested routes: /properties/:propertyId/units
@@ -137,6 +139,54 @@ nestedRouter.post(
 // Standalone routes: /units/:id
 const standaloneRouter = Router();
 standaloneRouter.use(authenticate, tenancy);
+
+// GET /units — list all units across all properties
+standaloneRouter.get(
+  "/",
+  validate({ query: unitListAllQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const orgId = req.organizationId!;
+    const query = req.query as unknown as UnitListAllQuery;
+    const { page, limit, sortBy, sortOrder, status, propertyId } = query;
+
+    const where = {
+      organizationId: orgId,
+      ...(status ? { status } : {}),
+      ...(propertyId ? { propertyId } : {}),
+    };
+
+    const orderBy = sortBy
+      ? { [sortBy]: sortOrder }
+      : { unitNumber: "asc" as const };
+
+    const [units, total] = await Promise.all([
+      prisma.unit.findMany({
+        where,
+        include: {
+          property: {
+            select: {
+              id: true,
+              name: true,
+              address: true,
+              city: true,
+              state: true,
+              zip: true,
+            },
+          },
+        },
+        orderBy,
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.unit.count({ where }),
+    ]);
+
+    res.json({
+      data: units,
+      pagination: getPaginationMeta(total, page, limit),
+    });
+  })
+);
 
 // GET /units/:id
 standaloneRouter.get(
