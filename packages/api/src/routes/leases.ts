@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../lib/async-handler.js";
@@ -23,6 +23,9 @@ import {
   signLeaseSchema,
   createAddendumSchema,
   addendumIdParamSchema,
+  countersignLeaseSchema,
+  tokenSignLeaseSchema,
+  signingTokenParamSchema,
 } from "../schemas/leases.js";
 import type {
   CreateLeaseInput,
@@ -31,11 +34,290 @@ import type {
   SignLeaseInput,
   CreateAddendumInput,
 } from "../schemas/leases.js";
+import {
+  generateLeaseHTML,
+  saveLeaseDocument,
+  DEFAULT_CLAUSES,
+} from "../services/leaseDocument.js";
+import {
+  sendEmail,
+  buildSignatureRequestEmail,
+  buildLeaseSignedConfirmationEmail,
+} from "../services/email.js";
+import { env } from "../config/env.js";
 
 const router = Router();
 
-// All lease routes require auth + tenancy
+// ─── Public route: token-based signing (NO auth required) ──────────
+// This must be defined BEFORE the auth middleware
+router.get(
+  "/sign/:token",
+  validate({ params: signingTokenParamSchema }),
+  asyncHandler(async (req, res) => {
+    const token = param(req, "token");
+
+    const leaseTenant = await prisma.leaseTenant.findFirst({
+      where: { signingToken: token },
+      include: {
+        tenant: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+        lease: {
+          include: {
+            organization: { select: { id: true, name: true } },
+            unit: {
+              select: {
+                id: true,
+                unitNumber: true,
+                bedrooms: true,
+                bathrooms: true,
+                sqFt: true,
+                property: {
+                  select: {
+                    id: true,
+                    name: true,
+                    address: true,
+                    city: true,
+                    state: true,
+                    zip: true,
+                  },
+                },
+              },
+            },
+            tenants: {
+              include: {
+                tenant: {
+                  select: { id: true, firstName: true, lastName: true, email: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!leaseTenant) {
+      throw new NotFoundError("Signing token");
+    }
+
+    if (leaseTenant.tokenExpiresAt && leaseTenant.tokenExpiresAt < new Date()) {
+      throw new ValidationError("This signing link has expired");
+    }
+
+    if (leaseTenant.signedAt) {
+      throw new ValidationError("You have already signed this lease");
+    }
+
+    if (leaseTenant.lease.status !== "PENDING_SIGNATURE") {
+      throw new ValidationError("This lease is no longer available for signing");
+    }
+
+    // Return lease data for the signing page
+    const lease = leaseTenant.lease;
+    res.json({
+      tenant: leaseTenant.tenant,
+      lease: {
+        id: lease.id,
+        startDate: lease.startDate,
+        endDate: lease.endDate,
+        monthlyRent: lease.monthlyRent,
+        securityDeposit: lease.securityDeposit,
+        lateFeeAmount: lease.lateFeeAmount,
+        lateFeeType: lease.lateFeeType,
+        gracePeriodDays: lease.gracePeriodDays,
+        rentDueDay: lease.rentDueDay,
+        terms: lease.terms,
+        documentUrl: lease.documentUrl,
+        documentHash: lease.documentHash,
+        status: lease.status,
+      },
+      unit: lease.unit,
+      organization: lease.organization,
+      tenants: lease.tenants.map((lt) => ({
+        firstName: lt.tenant.firstName,
+        lastName: lt.tenant.lastName,
+        isPrimary: lt.isPrimary,
+        signed: !!lt.signedAt,
+      })),
+    });
+  })
+);
+
+router.post(
+  "/sign/:token",
+  validate({ params: signingTokenParamSchema, body: tokenSignLeaseSchema }),
+  asyncHandler(async (req, res) => {
+    const token = param(req, "token");
+    const body = req.body as { fullName: string; email: string; agreedToTerms: true; agreedToEsign: true };
+
+    const leaseTenant = await prisma.leaseTenant.findFirst({
+      where: { signingToken: token },
+      include: {
+        tenant: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+        lease: {
+          include: {
+            unit: {
+              select: {
+                id: true,
+                unitNumber: true,
+                property: {
+                  select: { name: true, address: true, city: true, state: true, zip: true },
+                },
+              },
+            },
+            tenants: {
+              include: {
+                tenant: { select: { id: true, firstName: true, lastName: true, email: true } },
+              },
+            },
+            organization: { select: { name: true } },
+          },
+        },
+      },
+    });
+
+    if (!leaseTenant) {
+      throw new NotFoundError("Signing token");
+    }
+
+    if (leaseTenant.tokenExpiresAt && leaseTenant.tokenExpiresAt < new Date()) {
+      throw new ValidationError("This signing link has expired");
+    }
+
+    if (leaseTenant.signedAt) {
+      throw new ValidationError("You have already signed this lease");
+    }
+
+    const lease = leaseTenant.lease;
+    if (lease.status !== "PENDING_SIGNATURE") {
+      throw new ValidationError("This lease is no longer available for signing");
+    }
+
+    // Build signature data
+    const now = new Date();
+    const signatureHash = createHash("sha256")
+      .update(
+        JSON.stringify({
+          leaseId: lease.id,
+          tenantId: leaseTenant.tenantId,
+          fullName: body.fullName,
+          email: body.email,
+          documentHash: lease.documentHash ?? "",
+          timestamp: now.toISOString(),
+        })
+      )
+      .digest("hex");
+
+    const signatureData = {
+      fullName: body.fullName,
+      email: body.email,
+      ip: req.ip ?? req.socket.remoteAddress ?? "unknown",
+      userAgent: req.headers["user-agent"] ?? "unknown",
+      documentHash: lease.documentHash ?? "",
+      hash: signatureHash,
+      timestamp: now.toISOString(),
+    };
+
+    // Update the lease-tenant with signature, clear the token
+    await prisma.leaseTenant.update({
+      where: { id: leaseTenant.id },
+      data: {
+        signedAt: now,
+        signatureData,
+        signingToken: null,
+        tokenExpiresAt: null,
+      },
+    });
+
+    // Check if all tenants have now signed
+    const unsignedCount = lease.tenants.filter(
+      (lt) => lt.id !== leaseTenant.id && !lt.signedAt
+    ).length;
+
+    let leaseStatus: string = lease.status;
+    if (unsignedCount === 0) {
+      // All tenants signed — activate the lease
+      await prisma.$transaction(async (tx) => {
+        await tx.lease.update({
+          where: { id: lease.id },
+          data: { status: "ACTIVE" },
+        });
+
+        await tx.unit.update({
+          where: { id: lease.unitId },
+          data: { status: "OCCUPIED" },
+        });
+
+        const tenantIds = lease.tenants.map((lt) => lt.tenantId);
+        await tx.tenant.updateMany({
+          where: { id: { in: tenantIds } },
+          data: {
+            status: "ACTIVE",
+            currentUnitId: lease.unitId,
+            moveInDate: lease.startDate,
+          },
+        });
+      });
+      leaseStatus = "ACTIVE";
+    }
+
+    // Send confirmation emails
+    const unit = lease.unit;
+    const propertyAddress = `${unit.property.address}, ${unit.property.city}, ${unit.property.state}`;
+    for (const lt of lease.tenants) {
+      const confirmEmail = buildLeaseSignedConfirmationEmail({
+        recipientName: `${lt.tenant.firstName} ${lt.tenant.lastName}`,
+        propertyAddress,
+        unitNumber: unit.unitNumber,
+        allSigned: unsignedCount === 0,
+      });
+      sendEmail({
+        to: lt.tenant.email,
+        ...confirmEmail,
+      }).catch(() => {});
+    }
+
+    // Create audit log entry (no auth user for token-based, use tenant info)
+    prisma.auditLog
+      .create({
+        data: {
+          organizationId: lease.organizationId,
+          userId: leaseTenant.tenantId, // Best effort - use tenant ID
+          action: "SIGN",
+          entityType: "Lease",
+          entityId: lease.id,
+          changes: { fullName: body.fullName, email: body.email },
+          ipAddress: req.ip ?? req.socket.remoteAddress ?? null,
+        },
+      })
+      .catch(() => {});
+
+    res.json({
+      message:
+        leaseStatus === "ACTIVE"
+          ? "Lease fully signed and activated"
+          : "Signature recorded successfully",
+      leaseStatus,
+      signedAt: signatureData.timestamp,
+      allSigned: unsignedCount === 0,
+      remainingSignatures: unsignedCount,
+      documentUrl: lease.documentUrl,
+    });
+  })
+);
+
+// All remaining lease routes require auth + tenancy
 router.use(authenticate, tenancy);
+
+// ─── GET /leases/default-clauses ──────────────────────────────────
+router.get(
+  "/default-clauses",
+  asyncHandler(async (_req, res) => {
+    res.json({ data: DEFAULT_CLAUSES });
+  })
+);
 
 // ─── GET /leases ────────────────────────────────────────────────────
 router.get(
@@ -173,6 +455,7 @@ router.post(
           lateFeeAmount: body.lateFeeAmount,
           lateFeeType: body.lateFeeType,
           gracePeriodDays: body.gracePeriodDays,
+          rentDueDay: body.rentDueDay ?? 1,
           terms: (body.terms ?? {}) as Prisma.InputJsonValue,
           status: "DRAFT",
         },
@@ -230,10 +513,15 @@ router.get(
         organizationId: orgId,
       },
       include: {
+        organization: { select: { id: true, name: true } },
         unit: {
           select: {
             id: true,
             unitNumber: true,
+            bedrooms: true,
+            bathrooms: true,
+            sqFt: true,
+            rent: true,
             property: {
               select: {
                 id: true,
@@ -285,7 +573,28 @@ router.get(
       throw new NotFoundError("Lease", param(req, "id"));
     }
 
-    res.json(lease);
+    // Also fetch audit logs for timeline
+    const auditLogs = await prisma.auditLog.findMany({
+      where: {
+        organizationId: orgId,
+        entityType: "Lease",
+        entityId: lease.id,
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      select: {
+        id: true,
+        action: true,
+        changes: true,
+        ipAddress: true,
+        createdAt: true,
+        user: {
+          select: { firstName: true, lastName: true },
+        },
+      },
+    });
+
+    res.json({ ...lease, auditLogs });
   })
 );
 
@@ -349,7 +658,6 @@ router.patch(
 );
 
 // ─── POST /leases/:id/send-for-signature ───────────────────────────
-// Transitions a DRAFT lease to PENDING_SIGNATURE
 router.post(
   "/:id/send-for-signature",
   requireMinRole("TEAM_MEMBER"),
@@ -361,9 +669,31 @@ router.post(
     const lease = await prisma.lease.findFirst({
       where: { id: param(req, "id"), organizationId: orgId },
       include: {
+        organization: { select: { name: true } },
+        unit: {
+          select: {
+            id: true,
+            unitNumber: true,
+            bedrooms: true,
+            bathrooms: true,
+            sqFt: true,
+            property: {
+              select: {
+                id: true,
+                name: true,
+                address: true,
+                city: true,
+                state: true,
+                zip: true,
+              },
+            },
+          },
+        },
         tenants: {
           include: {
-            tenant: { select: { id: true, firstName: true, lastName: true, email: true } },
+            tenant: {
+              select: { id: true, firstName: true, lastName: true, email: true, phone: true },
+            },
           },
         },
       },
@@ -382,15 +712,80 @@ router.post(
       throw new ValidationError("Lease must have at least one tenant");
     }
 
+    // Generate lease document
+    const clauses = (lease.terms as { clauses?: any[] } | null)?.clauses ?? [];
+    const html = generateLeaseHTML({
+      leaseId: lease.id,
+      organizationName: lease.organization.name,
+      property: {
+        name: lease.unit.property.name,
+        address: lease.unit.property.address,
+        city: lease.unit.property.city,
+        state: lease.unit.property.state,
+        zip: lease.unit.property.zip,
+      },
+      unit: {
+        unitNumber: lease.unit.unitNumber,
+        bedrooms: lease.unit.bedrooms,
+        bathrooms: Number(lease.unit.bathrooms),
+        sqFt: lease.unit.sqFt,
+      },
+      tenants: lease.tenants.map((lt) => ({
+        id: lt.tenant.id,
+        firstName: lt.tenant.firstName,
+        lastName: lt.tenant.lastName,
+        email: lt.tenant.email,
+        phone: lt.tenant.phone,
+        isPrimary: lt.isPrimary,
+      })),
+      startDate: lease.startDate.toISOString(),
+      endDate: lease.endDate.toISOString(),
+      monthlyRent: Number(lease.monthlyRent),
+      securityDeposit: Number(lease.securityDeposit),
+      lateFeeAmount: lease.lateFeeAmount ? Number(lease.lateFeeAmount) : null,
+      lateFeeType: lease.lateFeeType,
+      gracePeriodDays: lease.gracePeriodDays,
+      rentDueDay: lease.rentDueDay,
+      clauses,
+    });
+
+    const { url: documentUrl, hash: documentHash } = saveLeaseDocument(html, lease.id);
+
+    // Generate signing tokens for each tenant
+    const tokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+    const signingTokens: { tenantId: string; token: string; email: string; name: string }[] = [];
+
+    for (const lt of lease.tenants) {
+      const token = randomUUID();
+      await prisma.leaseTenant.update({
+        where: { id: lt.id },
+        data: {
+          signingToken: token,
+          tokenExpiresAt: tokenExpiry,
+        },
+      });
+      signingTokens.push({
+        tenantId: lt.tenant.id,
+        token,
+        email: lt.tenant.email,
+        name: `${lt.tenant.firstName} ${lt.tenant.lastName}`,
+      });
+    }
+
+    // Update lease status and document
     const updated = await prisma.lease.update({
-      where: { id: param(req, "id") },
-      data: { status: "PENDING_SIGNATURE" },
+      where: { id: lease.id },
+      data: {
+        status: "PENDING_SIGNATURE",
+        documentUrl,
+        documentHash,
+      },
       include: {
         unit: {
           select: {
             id: true,
             unitNumber: true,
-            property: { select: { id: true, name: true } },
+            property: { select: { id: true, name: true, address: true } },
           },
         },
         tenants: {
@@ -403,11 +798,27 @@ router.post(
       },
     });
 
-    // TODO: Send email notifications to tenants with signature link
+    // Send emails to each tenant
+    const propertyAddress = `${lease.unit.property.address}, ${lease.unit.property.city}, ${lease.unit.property.state}`;
+    for (const st of signingTokens) {
+      const signingUrl = `${env.PORTAL_URL}/sign/${st.token}`;
+      const emailContent = buildSignatureRequestEmail({
+        tenantName: st.name,
+        propertyAddress,
+        unitNumber: lease.unit.unitNumber,
+        signingUrl,
+        landlordName: lease.organization.name,
+      });
+      sendEmail({
+        to: st.email,
+        ...emailContent,
+      }).catch(() => {});
+    }
 
     res.json({
       ...updated,
       message: "Lease sent for signature",
+      documentUrl,
       pendingSignatures: updated.tenants
         .filter((lt) => !lt.signedAt)
         .map((lt) => ({
@@ -420,7 +831,7 @@ router.post(
 );
 
 // ─── POST /leases/:id/sign ─────────────────────────────────────────
-// E-signature endpoint — tenant signs their portion of the lease
+// E-signature endpoint — authenticated tenant signs their portion
 router.post(
   "/:id/sign",
   validate({ params: leaseIdParamSchema, body: signLeaseSchema }),
@@ -472,6 +883,7 @@ router.post(
           tenantId: leaseTenant.tenantId,
           fullName: body.fullName,
           email: body.email,
+          documentHash: lease.documentHash ?? "",
           timestamp: new Date().toISOString(),
         })
       )
@@ -482,6 +894,7 @@ router.post(
       email: body.email,
       ip: req.ip ?? req.socket.remoteAddress ?? "unknown",
       userAgent: req.headers["user-agent"] ?? "unknown",
+      documentHash: lease.documentHash ?? "",
       hash: signatureHash,
       timestamp: new Date().toISOString(),
     };
@@ -492,6 +905,8 @@ router.post(
       data: {
         signedAt: new Date(),
         signatureData,
+        signingToken: null,
+        tokenExpiresAt: null,
       },
     });
 
@@ -502,20 +917,17 @@ router.post(
 
     let leaseStatus: string = lease.status;
     if (unsignedCount === 0) {
-      // All tenants signed — activate the lease
       await prisma.$transaction(async (tx) => {
         await tx.lease.update({
           where: { id: lease.id },
           data: { status: "ACTIVE" },
         });
 
-        // Update unit status to OCCUPIED
         await tx.unit.update({
           where: { id: lease.unitId },
           data: { status: "OCCUPIED" },
         });
 
-        // Update all tenants on this lease to ACTIVE with current unit
         const tenantIds = lease.tenants.map((lt) => lt.tenantId);
         await tx.tenant.updateMany({
           where: { id: { in: tenantIds } },
@@ -539,6 +951,160 @@ router.post(
       allSigned: unsignedCount === 0,
       remainingSignatures: unsignedCount,
     });
+  })
+);
+
+// ─── POST /leases/:id/countersign ──────────────────────────────────
+// Landlord countersigns after all tenants have signed
+router.post(
+  "/:id/countersign",
+  requireMinRole("TEAM_MEMBER"),
+  validate({ params: leaseIdParamSchema, body: countersignLeaseSchema }),
+  auditLog("COUNTERSIGN", "Lease"),
+  asyncHandler(async (req, res) => {
+    const orgId = req.organizationId!;
+    const body = req.body as { fullName: string };
+
+    const lease = await prisma.lease.findFirst({
+      where: { id: param(req, "id"), organizationId: orgId },
+      include: {
+        tenants: true,
+        organization: { select: { name: true } },
+        unit: {
+          select: {
+            unitNumber: true,
+            property: {
+              select: { address: true, city: true, state: true, zip: true },
+            },
+          },
+        },
+      },
+    });
+    if (!lease) {
+      throw new NotFoundError("Lease", param(req, "id"));
+    }
+
+    if (lease.status !== "ACTIVE") {
+      throw new ValidationError("Lease must be ACTIVE to countersign");
+    }
+
+    if (lease.landlordSignedAt) {
+      throw new ValidationError("Landlord has already countersigned this lease");
+    }
+
+    const now = new Date();
+    const landlordSignatureData = {
+      fullName: body.fullName,
+      ip: req.ip ?? req.socket.remoteAddress ?? "unknown",
+      userAgent: req.headers["user-agent"] ?? "unknown",
+      documentHash: lease.documentHash ?? "",
+      timestamp: now.toISOString(),
+    };
+
+    await prisma.lease.update({
+      where: { id: lease.id },
+      data: {
+        landlordSignedAt: now,
+        landlordSignatureData: landlordSignatureData as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    res.json({
+      message: "Lease countersigned successfully",
+      landlordSignedAt: now.toISOString(),
+    });
+  })
+);
+
+// ─── POST /leases/:id/resend ────────────────────────────────────────
+// Resend signing emails for pending signature leases
+router.post(
+  "/:id/resend",
+  requireMinRole("TEAM_MEMBER"),
+  validate({ params: leaseIdParamSchema }),
+  auditLog("RESEND_SIGNATURE", "Lease"),
+  asyncHandler(async (req, res) => {
+    const orgId = req.organizationId!;
+
+    const lease = await prisma.lease.findFirst({
+      where: { id: param(req, "id"), organizationId: orgId },
+      include: {
+        organization: { select: { name: true } },
+        unit: {
+          select: {
+            unitNumber: true,
+            property: {
+              select: { address: true, city: true, state: true, zip: true },
+            },
+          },
+        },
+        tenants: {
+          include: {
+            tenant: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
+      },
+    });
+    if (!lease) {
+      throw new NotFoundError("Lease", param(req, "id"));
+    }
+
+    if (lease.status !== "PENDING_SIGNATURE") {
+      throw new ValidationError("Can only resend for PENDING_SIGNATURE leases");
+    }
+
+    const unsignedTenants = lease.tenants.filter((lt) => !lt.signedAt);
+    const tokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const propertyAddress = `${lease.unit.property.address}, ${lease.unit.property.city}, ${lease.unit.property.state}`;
+
+    for (const lt of unsignedTenants) {
+      const token = randomUUID();
+      await prisma.leaseTenant.update({
+        where: { id: lt.id },
+        data: { signingToken: token, tokenExpiresAt: tokenExpiry },
+      });
+
+      const signingUrl = `${env.PORTAL_URL}/sign/${token}`;
+      const emailContent = buildSignatureRequestEmail({
+        tenantName: `${lt.tenant.firstName} ${lt.tenant.lastName}`,
+        propertyAddress,
+        unitNumber: lease.unit.unitNumber,
+        signingUrl,
+        landlordName: lease.organization.name,
+      });
+      sendEmail({ to: lt.tenant.email, ...emailContent }).catch(() => {});
+    }
+
+    res.json({
+      message: `Signing emails resent to ${unsignedTenants.length} tenant(s)`,
+      resentTo: unsignedTenants.map((lt) => lt.tenant.email),
+    });
+  })
+);
+
+// ─── DELETE /leases/:id ─────────────────────────────────────────────
+router.delete(
+  "/:id",
+  requireMinRole("TEAM_MEMBER"),
+  validate({ params: leaseIdParamSchema }),
+  auditLog("DELETE", "Lease"),
+  asyncHandler(async (req, res) => {
+    const orgId = req.organizationId!;
+
+    const lease = await prisma.lease.findFirst({
+      where: { id: param(req, "id"), organizationId: orgId },
+    });
+    if (!lease) {
+      throw new NotFoundError("Lease", param(req, "id"));
+    }
+
+    if (lease.status !== "DRAFT") {
+      throw new ValidationError("Only DRAFT leases can be deleted");
+    }
+
+    await prisma.lease.delete({ where: { id: lease.id } });
+
+    res.json({ message: "Lease deleted successfully" });
   })
 );
 
@@ -573,13 +1139,11 @@ router.post(
         data: { status: "TERMINATED" },
       });
 
-      // Set unit back to VACANT
       await tx.unit.update({
         where: { id: lease.unitId },
         data: { status: "VACANT" },
       });
 
-      // Update tenants — mark as FORMER, clear unit, set move-out date
       const tenantIds = lease.tenants.map((lt) => lt.tenantId);
       await tx.tenant.updateMany({
         where: { id: { in: tenantIds }, currentUnitId: lease.unitId },
@@ -597,7 +1161,6 @@ router.post(
 
 // ─── Addendums ──────────────────────────────────────────────────────
 
-// GET /leases/:id/addendums
 router.get(
   "/:id/addendums",
   validate({ params: leaseIdParamSchema }),
@@ -621,7 +1184,6 @@ router.get(
   })
 );
 
-// POST /leases/:id/addendums
 router.post(
   "/:id/addendums",
   requireMinRole("TEAM_MEMBER"),
@@ -657,7 +1219,6 @@ router.post(
   })
 );
 
-// DELETE /leases/:id/addendums/:addendumId
 router.delete(
   "/:id/addendums/:addendumId",
   requireMinRole("TEAM_MEMBER"),

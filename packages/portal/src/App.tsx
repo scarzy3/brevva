@@ -8,12 +8,14 @@ import Payments from "@/pages/Payments";
 import Maintenance from "@/pages/Maintenance";
 import Messages from "@/pages/Messages";
 import Profile from "@/pages/Profile";
+import SignLease from "@/pages/SignLease";
 import NotFound from "@/pages/NotFound";
 
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/sign/:token" element={<SignLease />} />
       <Route
         element={
           <PrivateRoute>

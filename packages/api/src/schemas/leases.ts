@@ -12,6 +12,7 @@ export const createLeaseSchema = z.object({
   lateFeeAmount: z.coerce.number().min(0).optional(),
   lateFeeType: z.enum(["FLAT", "PERCENTAGE"]).default("FLAT"),
   gracePeriodDays: z.coerce.number().int().min(0).default(5),
+  rentDueDay: z.coerce.number().int().min(1).max(28).default(1),
   terms: z.record(z.unknown()).optional(),
 });
 
@@ -21,6 +22,7 @@ export const updateLeaseSchema = z.object({
   lateFeeAmount: z.coerce.number().min(0).optional(),
   lateFeeType: z.enum(["FLAT", "PERCENTAGE"]).optional(),
   gracePeriodDays: z.coerce.number().int().min(0).optional(),
+  rentDueDay: z.coerce.number().int().min(1).max(28).optional(),
   terms: z.record(z.unknown()).optional(),
 });
 
@@ -37,13 +39,34 @@ export const leaseIdParamSchema = z.object({
   id: z.string().uuid(),
 });
 
-// E-signature
+// E-signature (authenticated user)
 export const signLeaseSchema = z.object({
   fullName: z.string().min(1).max(200),
   email: z.string().email(),
   agreedToTerms: z.literal(true, {
     errorMap: () => ({ message: "You must agree to the lease terms" }),
   }),
+});
+
+// E-signature (token-based, no auth)
+export const tokenSignLeaseSchema = z.object({
+  fullName: z.string().min(1).max(200),
+  email: z.string().email(),
+  agreedToTerms: z.literal(true, {
+    errorMap: () => ({ message: "You must agree to the lease terms" }),
+  }),
+  agreedToEsign: z.literal(true, {
+    errorMap: () => ({ message: "You must agree to use electronic signatures" }),
+  }),
+});
+
+export const signingTokenParamSchema = z.object({
+  token: z.string().uuid(),
+});
+
+// Landlord countersign
+export const countersignLeaseSchema = z.object({
+  fullName: z.string().min(1).max(200),
 });
 
 // Addendums
