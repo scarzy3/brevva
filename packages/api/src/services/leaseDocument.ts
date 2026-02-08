@@ -24,6 +24,8 @@ interface TenantInfo {
     fullName: string;
     timestamp: string;
     ip: string;
+    signatureImage?: string;
+    hash?: string;
   } | null;
 }
 
@@ -57,6 +59,8 @@ interface LeaseDocumentData {
   landlordSignature?: {
     fullName: string;
     timestamp: string;
+    ip?: string;
+    signatureImage?: string;
   } | null;
 }
 
@@ -75,10 +79,55 @@ function formatCurrency(amount: number): string {
   }).format(amount);
 }
 
+function formatDateTime(dateStr: string): string {
+  return new Date(dateStr).toLocaleString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  });
+}
+
 function ordinal(n: number): string {
   const s = ["th", "st", "nd", "rd"];
   const v = n % 100;
   return n + (s[(v - 20) % 10] ?? s[v] ?? s[0] ?? "th");
+}
+
+function renderSignedBlock(
+  label: string,
+  sigData: { fullName: string; timestamp: string; ip?: string; signatureImage?: string; hash?: string },
+): string {
+  const sigVisual = sigData.signatureImage
+    ? `<img src="${sigData.signatureImage}" alt="Signature" class="sig-image" />`
+    : `<span class="e-signature">${escapeHtml(sigData.fullName)}</span>`;
+
+  return `
+    <div class="sig-signed">
+      <div class="sig-badge">ELECTRONICALLY SIGNED</div>
+      <div class="sig-visual">${sigVisual}</div>
+      <div class="sig-meta">
+        <table class="sig-meta-table">
+          <tr><td class="sig-meta-label">Name:</td><td>${escapeHtml(sigData.fullName)}</td></tr>
+          <tr><td class="sig-meta-label">Role:</td><td>${escapeHtml(label)}</td></tr>
+          <tr><td class="sig-meta-label">Date:</td><td>${formatDateTime(sigData.timestamp)}</td></tr>
+          ${sigData.ip ? `<tr><td class="sig-meta-label">IP Address:</td><td>${escapeHtml(sigData.ip)}</td></tr>` : ""}
+          ${sigData.hash ? `<tr><td class="sig-meta-label">Signature ID:</td><td style="font-family:monospace;font-size:8pt">${sigData.hash.substring(0, 16)}...</td></tr>` : ""}
+        </table>
+      </div>
+    </div>`;
+}
+
+function renderUnsignedBlock(label: string): string {
+  return `
+    <div class="sig-unsigned">
+      <div class="sig-line"></div>
+      <p class="sig-unsigned-label">${escapeHtml(label)}</p>
+      <p class="sig-unsigned-date">Date: ________________</p>
+    </div>`;
 }
 
 export function generateLeaseHTML(data: LeaseDocumentData): string {
@@ -109,42 +158,19 @@ export function generateLeaseHTML(data: LeaseDocumentData): string {
   });
 
   const signatureBlocksHTML = data.tenants
-    .map(
-      (t) => `
-      <div class="signature-block">
-        <div class="signature-line">
-          ${
-            t.signedAt && t.signatureData
-              ? `<span class="e-signature">${escapeHtml(t.signatureData.fullName)}</span>`
-              : ""
-          }
-        </div>
-        <p class="signature-label">${escapeHtml(t.firstName)} ${escapeHtml(t.lastName)} (Tenant${t.isPrimary ? " - Primary" : ""})</p>
-        <p class="signature-date">${
-          t.signedAt ? `Electronically signed: ${formatDate(t.signedAt)}` : "Date: ________________"
-        }</p>
-      </div>
-    `
-    )
+    .map((t) => {
+      const label = `Tenant${t.isPrimary ? " (Primary)" : ""} \u2014 ${t.firstName} ${t.lastName}`;
+      if (t.signedAt && t.signatureData) {
+        return `<div class="signature-block">${renderSignedBlock(label, t.signatureData)}</div>`;
+      }
+      return `<div class="signature-block">${renderUnsignedBlock(label)}</div>`;
+    })
     .join("");
 
-  const landlordSignatureHTML = `
-    <div class="signature-block">
-      <div class="signature-line">
-        ${
-          data.landlordSignature
-            ? `<span class="e-signature">${escapeHtml(data.landlordSignature.fullName)}</span>`
-            : ""
-        }
-      </div>
-      <p class="signature-label">${escapeHtml(data.organizationName)} (Landlord/Property Manager)</p>
-      <p class="signature-date">${
-        data.landlordSignature
-          ? `Electronically signed: ${formatDate(data.landlordSignature.timestamp)}`
-          : "Date: ________________"
-      }</p>
-    </div>
-  `;
+  const landlordLabel = `Landlord/Property Manager \u2014 ${data.organizationName}`;
+  const landlordSignatureHTML = data.landlordSignature
+    ? `<div class="signature-block">${renderSignedBlock(landlordLabel, data.landlordSignature)}</div>`
+    : `<div class="signature-block">${renderUnsignedBlock(landlordLabel)}</div>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -174,11 +200,20 @@ export function generateLeaseHTML(data: LeaseDocumentData): string {
     .clause-content ul, .clause-content ol { margin-left: 20px; margin-bottom: 6px; }
     .signatures { margin-top: 40px; page-break-inside: avoid; }
     .signatures h2 { font-size: 13pt; text-transform: uppercase; border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-bottom: 20px; }
-    .signature-block { margin-bottom: 30px; }
-    .signature-line { border-bottom: 1px solid #333; min-height: 30px; margin-bottom: 4px; padding: 4px 0; }
-    .signature-label { font-size: 10pt; font-weight: bold; }
-    .signature-date { font-size: 10pt; color: #555; }
-    .e-signature { font-family: 'Brush Script MT', 'Segoe Script', cursive; font-size: 18pt; color: #1a365d; }
+    .signature-block { margin-bottom: 24px; page-break-inside: avoid; }
+    .sig-signed { border: 2px solid #2563eb; border-radius: 8px; padding: 16px; background: #f0f7ff; }
+    .sig-badge { display: inline-block; background: #2563eb; color: #fff; font-size: 8pt; font-weight: bold; letter-spacing: 1px; padding: 2px 8px; border-radius: 3px; margin-bottom: 10px; font-family: Arial, sans-serif; }
+    .sig-visual { border-bottom: 2px solid #1e40af; padding: 8px 0 10px; margin-bottom: 10px; min-height: 50px; }
+    .sig-image { max-height: 60px; max-width: 280px; }
+    .e-signature { font-family: 'Brush Script MT', 'Segoe Script', cursive; font-size: 24pt; color: #1a365d; }
+    .sig-meta { font-size: 9pt; color: #444; font-family: Arial, sans-serif; }
+    .sig-meta-table { border-collapse: collapse; }
+    .sig-meta-table td { padding: 1px 8px 1px 0; vertical-align: top; }
+    .sig-meta-label { font-weight: bold; color: #666; white-space: nowrap; }
+    .sig-unsigned { padding: 16px 0; }
+    .sig-line { border-bottom: 1px solid #333; min-height: 40px; margin-bottom: 6px; }
+    .sig-unsigned-label { font-size: 10pt; font-weight: bold; }
+    .sig-unsigned-date { font-size: 10pt; color: #555; }
     .disclosure { margin-top: 30px; padding: 16px; border: 1px solid #ccc; background: #f9f9f9; font-size: 10pt; page-break-inside: avoid; }
     .disclosure h3 { font-size: 11pt; margin-bottom: 8px; }
     .footer { margin-top: 30px; text-align: center; font-size: 9pt; color: #999; border-top: 1px solid #ccc; padding-top: 10px; }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -13,6 +13,9 @@ import {
   Download,
   Shield,
   Loader2,
+  Eraser,
+  PenLine,
+  Type,
 } from "lucide-react";
 
 function currency(n: number) {
@@ -30,13 +33,258 @@ function fmtDate(d: string) {
   });
 }
 
-interface SigningData {
-  tenant: {
-    id: string;
-    firstName: string;
-    lastName: string;
-    email: string;
+function fmtDateTime(d: string) {
+  return new Date(d).toLocaleString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Signature pad fonts
+// ---------------------------------------------------------------------------
+const SIGNATURE_FONTS = [
+  { label: "Script", value: "'Brush Script MT', 'Segoe Script', cursive" },
+  { label: "Formal", value: "Georgia, 'Times New Roman', serif" },
+  { label: "Casual", value: "'Comic Sans MS', 'Segoe Print', cursive" },
+  { label: "Elegant", value: "'Palatino Linotype', 'Book Antiqua', serif" },
+];
+
+// ---------------------------------------------------------------------------
+// Canvas draw pad
+// ---------------------------------------------------------------------------
+function DrawPad({
+  canvasRef,
+  onDrawn,
+}: {
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
+  onDrawn: () => void;
+}) {
+  const isDrawing = useRef(false);
+
+  const getPos = (
+    e: React.MouseEvent | React.TouchEvent,
+    canvas: HTMLCanvasElement,
+  ) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    if ("touches" in e) {
+      const touch = e.touches[0];
+      if (!touch) return { x: 0, y: 0 };
+      return {
+        x: (touch.clientX - rect.left) * scaleX,
+        y: (touch.clientY - rect.top) * scaleY,
+      };
+    }
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+    };
   };
+
+  const startDraw = (e: React.MouseEvent | React.TouchEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    isDrawing.current = true;
+    const pos = getPos(e, canvas);
+    ctx.beginPath();
+    ctx.moveTo(pos.x, pos.y);
+  };
+
+  const draw = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!isDrawing.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const pos = getPos(e, canvas);
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#1a365d";
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+  };
+
+  const stopDraw = () => {
+    if (isDrawing.current) {
+      isDrawing.current = false;
+      onDrawn();
+    }
+  };
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={500}
+      height={120}
+      className="w-full cursor-crosshair rounded-lg border-2 border-dashed border-gray-300 bg-white touch-none"
+      style={{ height: 120 }}
+      onMouseDown={startDraw}
+      onMouseMove={draw}
+      onMouseUp={stopDraw}
+      onMouseLeave={stopDraw}
+      onTouchStart={startDraw}
+      onTouchMove={draw}
+      onTouchEnd={stopDraw}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Signature pad (draw / type)
+// ---------------------------------------------------------------------------
+function SignaturePad({
+  fullName,
+  onSignatureReady,
+}: {
+  fullName: string;
+  onSignatureReady: (dataUrl: string | null) => void;
+}) {
+  const [mode, setMode] = useState<"draw" | "type">("draw");
+  const [hasDrawn, setHasDrawn] = useState(false);
+  const [fontIdx, setFontIdx] = useState(0);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const clearCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setHasDrawn(false);
+    onSignatureReady(null);
+  }, [onSignatureReady]);
+
+  const exportSignature = useCallback((): string | null => {
+    if (mode === "draw") {
+      const canvas = canvasRef.current;
+      if (!canvas || !hasDrawn) return null;
+      return canvas.toDataURL("image/png");
+    }
+    if (!fullName.trim()) return null;
+    const tmp = document.createElement("canvas");
+    tmp.width = 500;
+    tmp.height = 120;
+    const ctx = tmp.getContext("2d");
+    if (!ctx) return null;
+    ctx.fillStyle = "#1a365d";
+    ctx.font = `italic 36px ${SIGNATURE_FONTS[fontIdx]?.value ?? "cursive"}`;
+    ctx.textBaseline = "middle";
+    ctx.fillText(fullName, 16, 60);
+    return tmp.toDataURL("image/png");
+  }, [mode, hasDrawn, fullName, fontIdx]);
+
+  useEffect(() => {
+    if (mode === "draw") {
+      onSignatureReady(hasDrawn ? exportSignature() : null);
+    } else {
+      onSignatureReady(fullName.trim() ? exportSignature() : null);
+    }
+  }, [mode, hasDrawn, fullName, fontIdx, exportSignature, onSignatureReady]);
+
+  return (
+    <div>
+      <div className="mb-3 flex gap-1 rounded-lg bg-gray-100 p-1">
+        <button
+          type="button"
+          onClick={() => { setMode("draw"); clearCanvas(); }}
+          className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+            mode === "draw"
+              ? "bg-white text-blue-700 shadow-sm"
+              : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          <PenLine className="h-4 w-4" />
+          Draw
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("type")}
+          className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+            mode === "type"
+              ? "bg-white text-blue-700 shadow-sm"
+              : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          <Type className="h-4 w-4" />
+          Type
+        </button>
+      </div>
+
+      {mode === "draw" ? (
+        <div>
+          <DrawPad canvasRef={canvasRef} onDrawn={() => setHasDrawn(true)} />
+          <div className="mt-2 flex items-center justify-between">
+            <p className="text-xs text-gray-400">
+              Draw your signature using your mouse or finger
+            </p>
+            <button
+              type="button"
+              onClick={clearCanvas}
+              className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+            >
+              <Eraser className="h-3 w-3" />
+              Clear
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <div className="mb-3 flex gap-2">
+            {SIGNATURE_FONTS.map((f, i) => (
+              <button
+                key={f.label}
+                type="button"
+                onClick={() => setFontIdx(i)}
+                className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  fontIdx === i
+                    ? "border-blue-300 bg-blue-50 text-blue-700"
+                    : "border-gray-200 text-gray-500 hover:border-gray-300"
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex h-[120px] items-center rounded-lg border-2 border-dashed border-gray-300 bg-white px-4">
+            {fullName.trim() ? (
+              <span
+                className="text-[36px] italic"
+                style={{
+                  fontFamily: SIGNATURE_FONTS[fontIdx]?.value ?? "cursive",
+                  color: "#1a365d",
+                }}
+              >
+                {fullName}
+              </span>
+            ) : (
+              <span className="text-sm text-gray-300">
+                Your name will appear here as a signature
+              </span>
+            )}
+          </div>
+          <p className="mt-2 text-xs text-gray-400">
+            Select a style and your typed name will be used as your signature
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+interface SigningData {
+  tenant: { id: string; firstName: string; lastName: string; email: string };
   lease: {
     id: string;
     startDate: string;
@@ -67,10 +315,7 @@ interface SigningData {
       zip: string;
     };
   };
-  organization: {
-    id: string;
-    name: string;
-  };
+  organization: { id: string; name: string };
   tenants: {
     firstName: string;
     lastName: string;
@@ -86,6 +331,9 @@ interface SignResult {
   documentUrl?: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
 export default function SignLease() {
   const { token } = useParams();
 
@@ -93,23 +341,20 @@ export default function SignLease() {
   const [agreedToEsign, setAgreedToEsign] = useState(false);
   const [fullName, setFullName] = useState("");
   const [nameInitialized, setNameInitialized] = useState(false);
+  const [signatureImage, setSignatureImage] = useState<string | null>(null);
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
   const [signResult, setSignResult] = useState<SignResult | null>(null);
 
-  const {
-    data,
-    isLoading,
-    error,
-  } = useQuery<SigningData>({
+  const { data, isLoading, error } = useQuery<SigningData>({
     queryKey: ["sign-lease", token],
     queryFn: async () => {
       const res = await fetch("/api/v1/leases/sign/" + token);
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         const message =
-          body?.error ?? body?.message ?? `Request failed (${res.status})`;
-        throw new Error(message);
+          body?.error?.message ?? body?.error ?? body?.message ?? `Request failed (${res.status})`;
+        throw new Error(typeof message === "string" ? message : String(message));
       }
       return res.json();
     },
@@ -117,14 +362,13 @@ export default function SignLease() {
     retry: false,
   });
 
-  // Pre-fill name once data loads
   if (data && !nameInitialized) {
     setFullName(`${data.tenant.firstName} ${data.tenant.lastName}`);
     setNameInitialized(true);
   }
 
   const handleSign = async () => {
-    if (!agreedToTerms || !agreedToEsign || !fullName.trim()) return;
+    if (!agreedToTerms || !agreedToEsign || !fullName.trim() || !signatureImage) return;
 
     setSigning(true);
     setSignError(null);
@@ -138,14 +382,14 @@ export default function SignLease() {
           email: data!.tenant.email,
           agreedToTerms: true,
           agreedToEsign: true,
+          signatureImage,
         }),
       });
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        throw new Error(
-          body?.error ?? body?.message ?? `Signing failed (${res.status})`
-        );
+        const msg = body?.error?.message ?? body?.error ?? body?.message ?? `Signing failed (${res.status})`;
+        throw new Error(typeof msg === "string" ? msg : String(msg));
       }
 
       const result: SignResult = await res.json();
@@ -157,7 +401,7 @@ export default function SignLease() {
     }
   };
 
-  // --- Loading state ---
+  // --- Loading ---
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50">
@@ -169,13 +413,10 @@ export default function SignLease() {
     );
   }
 
-  // --- Error state ---
+  // --- Error ---
   if (error) {
-    const msg =
-      error instanceof Error ? error.message : "Unable to load lease details";
-    const isExpired =
-      msg.toLowerCase().includes("expired") ||
-      msg.toLowerCase().includes("not found");
+    const msg = error instanceof Error ? error.message : "Unable to load lease details";
+    const isExpired = msg.toLowerCase().includes("expired") || msg.toLowerCase().includes("not found");
     const isAlreadySigned = msg.toLowerCase().includes("already signed");
 
     return (
@@ -184,12 +425,9 @@ export default function SignLease() {
           {isAlreadySigned ? (
             <>
               <CheckCircle className="mx-auto h-14 w-14 text-green-500" />
-              <h1 className="mt-4 text-xl font-bold text-gray-900">
-                Already Signed
-              </h1>
+              <h1 className="mt-4 text-xl font-bold text-gray-900">Already Signed</h1>
               <p className="mt-2 text-sm text-gray-500">
-                You have already signed this lease agreement. No further action
-                is needed.
+                You have already signed this lease agreement. No further action is needed.
               </p>
             </>
           ) : (
@@ -200,8 +438,7 @@ export default function SignLease() {
               </h1>
               <p className="mt-2 text-sm text-gray-500">{msg}</p>
               <p className="mt-4 text-xs text-gray-400">
-                If you believe this is an error, please contact your property
-                manager.
+                If you believe this is an error, please contact your property manager.
               </p>
             </>
           )}
@@ -215,7 +452,7 @@ export default function SignLease() {
   const { tenant, lease, unit, organization, tenants } = data;
   const property = unit.property;
 
-  // --- Success state (after signing) ---
+  // --- Success ---
   if (signResult) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
@@ -224,15 +461,10 @@ export default function SignLease() {
             <CheckCircle className="h-10 w-10 text-green-600" />
           </div>
           <h1 className="mt-6 text-2xl font-bold text-gray-900">Thank You!</h1>
-          <p className="mt-2 text-gray-600">
-            Your lease agreement has been successfully signed.
-          </p>
+          <p className="mt-2 text-gray-600">Your lease agreement has been successfully signed.</p>
           <div className="mt-4 rounded-lg bg-gray-50 p-4 text-sm text-gray-600">
             <p>
-              Signed on{" "}
-              <span className="font-medium">
-                {fmtDate(signResult.signedAt)}
-              </span>
+              Signed on <span className="font-medium">{fmtDateTime(signResult.signedAt)}</span>
             </p>
             {signResult.remainingSignatures > 0 ? (
               <p className="mt-1">
@@ -258,8 +490,7 @@ export default function SignLease() {
             </a>
           )}
           <p className="mt-6 text-xs text-gray-400">
-            A confirmation email has been sent to {tenant.email}. You may close
-            this page.
+            A confirmation email has been sent to {tenant.email}. You may close this page.
           </p>
         </div>
       </div>
@@ -268,7 +499,7 @@ export default function SignLease() {
 
   // --- Main signing page ---
   const canSubmit =
-    agreedToTerms && agreedToEsign && fullName.trim().length > 0 && !signing;
+    agreedToTerms && agreedToEsign && fullName.trim().length > 0 && signatureImage !== null && !signing;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -279,20 +510,15 @@ export default function SignLease() {
             <Shield className="h-5 w-5 text-white" />
           </div>
           <div>
-            <p className="text-sm font-semibold text-gray-900">
-              {organization.name}
-            </p>
+            <p className="text-sm font-semibold text-gray-900">{organization.name}</p>
             <p className="text-xs text-gray-500">Secure Lease Signing</p>
           </div>
         </div>
       </div>
 
       <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
-        {/* Header */}
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">
-            Lease Agreement
-          </h1>
+          <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">Lease Agreement</h1>
           <p className="mt-1 text-gray-500">
             {property.address}, {property.city}, {property.state} {property.zip}
           </p>
@@ -309,26 +535,20 @@ export default function SignLease() {
               <Calendar className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
               <div>
                 <p className="text-xs font-medium text-gray-500">Start Date</p>
-                <p className="text-sm font-semibold text-gray-900">
-                  {fmtDate(lease.startDate)}
-                </p>
+                <p className="text-sm font-semibold text-gray-900">{fmtDate(lease.startDate)}</p>
               </div>
             </div>
             <div className="flex items-start gap-3 rounded-lg bg-gray-50 p-3">
               <Calendar className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
               <div>
                 <p className="text-xs font-medium text-gray-500">End Date</p>
-                <p className="text-sm font-semibold text-gray-900">
-                  {fmtDate(lease.endDate)}
-                </p>
+                <p className="text-sm font-semibold text-gray-900">{fmtDate(lease.endDate)}</p>
               </div>
             </div>
             <div className="flex items-start gap-3 rounded-lg bg-gray-50 p-3">
               <DollarSign className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
               <div>
-                <p className="text-xs font-medium text-gray-500">
-                  Monthly Rent
-                </p>
+                <p className="text-xs font-medium text-gray-500">Monthly Rent</p>
                 <p className="text-sm font-semibold text-gray-900">
                   {currency(Number(lease.monthlyRent))}
                 </p>
@@ -337,9 +557,7 @@ export default function SignLease() {
             <div className="flex items-start gap-3 rounded-lg bg-gray-50 p-3">
               <DollarSign className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
               <div>
-                <p className="text-xs font-medium text-gray-500">
-                  Security Deposit
-                </p>
+                <p className="text-xs font-medium text-gray-500">Security Deposit</p>
                 <p className="text-sm font-semibold text-gray-900">
                   {currency(Number(lease.securityDeposit))}
                 </p>
@@ -362,12 +580,9 @@ export default function SignLease() {
               <div className="flex items-start gap-3 rounded-lg bg-gray-50 p-3">
                 <Clock className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
                 <div>
-                  <p className="text-xs font-medium text-gray-500">
-                    Grace Period
-                  </p>
+                  <p className="text-xs font-medium text-gray-500">Grace Period</p>
                   <p className="text-sm font-semibold text-gray-900">
-                    {lease.gracePeriodDays} day
-                    {lease.gracePeriodDays !== 1 ? "s" : ""}
+                    {lease.gracePeriodDays} day{lease.gracePeriodDays !== 1 ? "s" : ""}
                   </p>
                 </div>
               </div>
@@ -384,8 +599,7 @@ export default function SignLease() {
           <div className="mt-3 text-sm text-gray-700">
             <p className="font-medium">{property.name}</p>
             <p className="text-gray-500">
-              {property.address}, {property.city}, {property.state}{" "}
-              {property.zip}
+              {property.address}, {property.city}, {property.state} {property.zip}
             </p>
             <p className="mt-2">
               <span className="font-medium">Unit:</span> {unit.unitNumber}
@@ -454,25 +668,20 @@ export default function SignLease() {
             </div>
           ) : (
             <div className="mt-4 flex items-center justify-center rounded-lg border border-dashed bg-gray-50 py-16">
-              <p className="text-sm text-gray-400">
-                Document preview not available
-              </p>
+              <p className="text-sm text-gray-400">Document preview not available</p>
             </div>
           )}
         </div>
 
         {/* Signature Form */}
         <div className="rounded-xl border-2 border-blue-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-gray-900">
-            Sign This Lease
-          </h2>
+          <h2 className="text-lg font-semibold text-gray-900">Sign This Lease</h2>
           <p className="mt-1 text-sm text-gray-500">
-            Please review the lease terms above, then complete the fields below
-            to sign electronically.
+            Please review the lease terms above, then complete the fields below to sign
+            electronically.
           </p>
 
-          <div className="mt-6 space-y-4">
-            {/* Agreement checkboxes */}
+          <div className="mt-6 space-y-5">
             <label className="flex cursor-pointer items-start gap-3">
               <input
                 type="checkbox"
@@ -493,17 +702,13 @@ export default function SignLease() {
                 className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
               <span className="text-sm text-gray-700">
-                I agree to use electronic signatures as a legally binding method
-                of signing this document
+                I agree to use electronic signatures as a legally binding method of signing this
+                document
               </span>
             </label>
 
-            {/* Full Name */}
             <div>
-              <label
-                htmlFor="fullName"
-                className="block text-sm font-medium text-gray-700"
-              >
+              <label htmlFor="fullName" className="block text-sm font-medium text-gray-700">
                 Full Legal Name
               </label>
               <input
@@ -516,12 +721,16 @@ export default function SignLease() {
               />
             </div>
 
-            {/* Email (readonly) */}
+            {/* Signature Pad */}
             <div>
-              <label
-                htmlFor="email"
-                className="block text-sm font-medium text-gray-700"
-              >
+              <label className="mb-2 block text-sm font-medium text-gray-700">
+                Your Signature
+              </label>
+              <SignaturePad fullName={fullName} onSignatureReady={setSignatureImage} />
+            </div>
+
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
                 Email
               </label>
               <input
@@ -533,14 +742,23 @@ export default function SignLease() {
               />
             </div>
 
-            {/* Error */}
+            {/* Signing timestamp */}
+            <div className="rounded-lg bg-gray-50 px-4 py-3 text-sm text-gray-600">
+              <span className="font-medium">Signing date:</span>{" "}
+              {new Date().toLocaleString("en-US", {
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+                timeZoneName: "short",
+              })}
+            </div>
+
             {signError && (
-              <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
-                {signError}
-              </div>
+              <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{signError}</div>
             )}
 
-            {/* Submit */}
             <button
               onClick={handleSign}
               disabled={!canSubmit}
@@ -561,16 +779,13 @@ export default function SignLease() {
           </div>
 
           <p className="mt-4 text-center text-xs text-gray-400">
-            By signing, you acknowledge that this electronic signature carries
-            the same legal weight as a handwritten signature.
+            By signing, you acknowledge that this electronic signature carries the same legal
+            weight as a handwritten signature under the ESIGN Act (15 U.S.C. &sect; 7001).
           </p>
         </div>
 
-        {/* Footer */}
         <div className="mt-8 border-t pt-6 text-center text-xs text-gray-400">
-          <p>
-            Powered by Brevva &mdash; Secure electronic lease signing
-          </p>
+          <p>Powered by Brevva &mdash; Secure electronic lease signing</p>
         </div>
       </div>
     </div>
