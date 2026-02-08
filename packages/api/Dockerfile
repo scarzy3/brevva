@@ -17,6 +17,7 @@ COPY packages/api/ ./packages/api/
 # Generate Prisma client and compile TypeScript
 RUN npx prisma generate --schema=packages/api/prisma/schema.prisma
 RUN npm run build --workspace=packages/api
+RUN npx tsc --project packages/api/tsconfig.seed.json
 
 # ── Production stage ──────────────────────────────────────────────────
 FROM node:20-alpine AS runner
@@ -39,6 +40,7 @@ RUN npx prisma generate --schema=packages/api/prisma/schema.prisma
 
 # Copy compiled output from builder
 COPY --from=builder /app/packages/api/dist/ ./packages/api/dist/
+COPY --from=builder /app/packages/api/prisma/dist/ ./packages/api/prisma/dist/
 
 # Create uploads directory
 RUN mkdir -p /app/packages/api/uploads

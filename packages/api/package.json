@@ -13,7 +13,7 @@
     "db:studio": "prisma studio"
   },
   "prisma": {
-    "seed": "npx tsx prisma/seed.ts"
+    "seed": "node prisma/dist/seed.js"
   },
   "dependencies": {
     "@prisma/client": "^6.3.0",
