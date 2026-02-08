@@ -16,6 +16,10 @@ import tenantRoutes from "./routes/tenants.js";
 import leaseRoutes from "./routes/leases.js";
 import paymentRoutes from "./routes/payments.js";
 import transactionRoutes from "./routes/transactions.js";
+import maintenanceRoutes from "./routes/maintenance.js";
+import vendorRoutes from "./routes/vendors.js";
+import messageRoutes from "./routes/messages.js";
+import portalRoutes from "./routes/portal.js";
 import webhookRoutes from "./routes/webhooks.js";
 
 const app = express();
@@ -92,6 +96,10 @@ app.use("/api/v1/tenants", tenantRoutes);
 app.use("/api/v1/leases", leaseRoutes);
 app.use("/api/v1/payments", paymentRoutes);
 app.use("/api/v1/transactions", transactionRoutes);
+app.use("/api/v1/maintenance", maintenanceRoutes);
+app.use("/api/v1/vendors", vendorRoutes);
+app.use("/api/v1/messages", messageRoutes);
+app.use("/api/v1/portal", portalRoutes);
 
 // ─── 9. 404 handler ──────────────────────────────────────────────────
 app.use((_req, res) => {
