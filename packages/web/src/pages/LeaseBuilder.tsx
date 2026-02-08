@@ -40,7 +40,7 @@ interface Unit {
   unitNumber: string;
   bedrooms: number;
   bathrooms: number;
-  sqft: number;
+  sqFt?: number | null;
   rent: number;
   status: string;
   property?: {
@@ -284,11 +284,11 @@ function StepSelectUnit({
             </div>
             <div className="flex items-center gap-1.5 text-sm text-gray-600">
               <Maximize2 className="h-4 w-4" />
-              {selectedUnit.sqft.toLocaleString()} sqft
+              {(selectedUnit.sqFt ?? 0).toLocaleString()} sqft
             </div>
             <div className="flex items-center gap-1.5 text-sm font-semibold text-gray-800">
               <DollarSign className="h-4 w-4" />
-              {currency(selectedUnit.rent)}/mo
+              {currency(Number(selectedUnit.rent))}/mo
             </div>
           </div>
         </div>
@@ -350,13 +350,13 @@ function StepSelectUnit({
                         </span>
                       </div>
                       <span className="font-semibold text-gray-800">
-                        {currency(unit.rent)}/mo
+                        {currency(Number(unit.rent))}/mo
                       </span>
                     </div>
                     <div className="mt-1.5 flex gap-4 text-xs text-gray-500">
                       <span>{unit.bedrooms} bed</span>
                       <span>{unit.bathrooms} bath</span>
-                      <span>{unit.sqft.toLocaleString()} sqft</span>
+                      <span>{(unit.sqFt ?? 0).toLocaleString()} sqft</span>
                     </div>
                   </button>
                 ))}
@@ -1262,7 +1262,7 @@ function StepReview({
               <div className="mt-1 flex gap-3 text-sm text-gray-500">
                 <span>{unit.bedrooms} bed</span>
                 <span>{unit.bathrooms} bath</span>
-                <span>{unit.sqft.toLocaleString()} sqft</span>
+                <span>{(unit.sqFt ?? 0).toLocaleString()} sqft</span>
               </div>
             </div>
             <span
@@ -1467,10 +1467,11 @@ export default function LeaseBuilder() {
   const handleUnitSelect = useCallback(
     (unit: Unit) => {
       setSelectedUnit(unit);
+      const rent = Number(unit.rent) || 0;
       setTerms((prev) => ({
         ...prev,
-        monthlyRent: unit.rent,
-        securityDeposit: unit.rent,
+        monthlyRent: rent,
+        securityDeposit: rent,
       }));
     },
     [],
@@ -1624,7 +1625,7 @@ export default function LeaseBuilder() {
           <StepLeaseTerms
             terms={terms}
             setTerms={setTerms}
-            unitRent={selectedUnit?.rent ?? 0}
+            unitRent={Number(selectedUnit?.rent ?? 0)}
           />
         )}
         {currentStep === 3 && (
