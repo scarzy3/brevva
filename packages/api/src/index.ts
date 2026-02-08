@@ -14,6 +14,9 @@ import {
 } from "./routes/units.js";
 import tenantRoutes from "./routes/tenants.js";
 import leaseRoutes from "./routes/leases.js";
+import paymentRoutes from "./routes/payments.js";
+import transactionRoutes from "./routes/transactions.js";
+import webhookRoutes from "./routes/webhooks.js";
 
 const app = express();
 
@@ -61,33 +64,36 @@ const authLimiter = rateLimit({
 app.use("/api/v1/auth", authLimiter);
 app.use(generalLimiter);
 
-// ─── 4. Body parsing ─────────────────────────────────────────────────
-// Note: Stripe webhook route needs raw body — mount it BEFORE json parser
-// when we implement webhooks. For now, apply json parser globally.
+// ─── 4. Stripe webhooks (raw body, before JSON parser) ──────────────
+app.use("/api/v1/webhooks", webhookRoutes);
+
+// ─── 5. Body parsing ─────────────────────────────────────────────────
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// ─── 5. Static file serving for uploads ──────────────────────────────
+// ─── 6. Static file serving for uploads ──────────────────────────────
 const uploadDir = path.resolve(env.UPLOAD_DIR);
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 app.use("/uploads", express.static(uploadDir));
 
-// ─── 6. Health check ─────────────────────────────────────────────────
+// ─── 7. Health check ─────────────────────────────────────────────────
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// ─── 7. API routes ───────────────────────────────────────────────────
+// ─── 8. API routes ───────────────────────────────────────────────────
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/properties", propertyRoutes);
 app.use("/api/v1/properties/:propertyId/units", unitNestedRouter);
 app.use("/api/v1/units", unitStandaloneRouter);
 app.use("/api/v1/tenants", tenantRoutes);
 app.use("/api/v1/leases", leaseRoutes);
+app.use("/api/v1/payments", paymentRoutes);
+app.use("/api/v1/transactions", transactionRoutes);
 
-// ─── 8. 404 handler ──────────────────────────────────────────────────
+// ─── 9. 404 handler ──────────────────────────────────────────────────
 app.use((_req, res) => {
   res.status(404).json({
     error: {
@@ -97,7 +103,7 @@ app.use((_req, res) => {
   });
 });
 
-// ─── 9. Error handler ────────────────────────────────────────────────
+// ─── 10. Error handler ───────────────────────────────────────────────
 app.use(errorHandler);
 
 // ─── Start server ────────────────────────────────────────────────────
