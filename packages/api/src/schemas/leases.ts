@@ -46,6 +46,7 @@ export const signLeaseSchema = z.object({
   agreedToTerms: z.literal(true, {
     errorMap: () => ({ message: "You must agree to the lease terms" }),
   }),
+  signatureImage: z.string().max(100000).optional(),
 });
 
 // E-signature (token-based, no auth)
@@ -58,6 +59,7 @@ export const tokenSignLeaseSchema = z.object({
   agreedToEsign: z.literal(true, {
     errorMap: () => ({ message: "You must agree to use electronic signatures" }),
   }),
+  signatureImage: z.string().max(100000).optional(),
 });
 
 export const signingTokenParamSchema = z.object({
@@ -67,6 +69,7 @@ export const signingTokenParamSchema = z.object({
 // Landlord countersign
 export const countersignLeaseSchema = z.object({
   fullName: z.string().min(1).max(200),
+  signatureImage: z.string().max(100000).optional(),
 });
 
 // Addendums

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -25,6 +25,9 @@ import {
   Plus,
   Ban,
   Shield,
+  Eraser,
+  Type,
+  Loader2,
 } from "lucide-react";
 
 function currency(n: number) {
@@ -70,6 +73,236 @@ const statusLabels: Record<string, string> = {
   TERMINATED: "Terminated",
 };
 
+// ---------------------------------------------------------------------------
+// Signature pad (for countersign modal)
+// ---------------------------------------------------------------------------
+const SIGNATURE_FONTS = [
+  { label: "Script", value: "'Brush Script MT', 'Segoe Script', cursive" },
+  { label: "Formal", value: "Georgia, 'Times New Roman', serif" },
+  { label: "Casual", value: "'Comic Sans MS', 'Segoe Print', cursive" },
+  { label: "Elegant", value: "'Palatino Linotype', 'Book Antiqua', serif" },
+];
+
+function DrawPad({
+  canvasRef,
+  onDrawn,
+}: {
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
+  onDrawn: () => void;
+}) {
+  const isDrawing = useRef(false);
+
+  const getPos = (
+    e: React.MouseEvent | React.TouchEvent,
+    canvas: HTMLCanvasElement,
+  ) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    if ("touches" in e) {
+      const touch = e.touches[0];
+      if (!touch) return { x: 0, y: 0 };
+      return {
+        x: (touch.clientX - rect.left) * scaleX,
+        y: (touch.clientY - rect.top) * scaleY,
+      };
+    }
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+    };
+  };
+
+  const startDraw = (e: React.MouseEvent | React.TouchEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    isDrawing.current = true;
+    const pos = getPos(e, canvas);
+    ctx.beginPath();
+    ctx.moveTo(pos.x, pos.y);
+  };
+
+  const draw = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!isDrawing.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const pos = getPos(e, canvas);
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#1a365d";
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+  };
+
+  const stopDraw = () => {
+    if (isDrawing.current) {
+      isDrawing.current = false;
+      onDrawn();
+    }
+  };
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={500}
+      height={120}
+      className="w-full cursor-crosshair rounded-lg border-2 border-dashed border-gray-300 bg-white touch-none"
+      style={{ height: 120 }}
+      onMouseDown={startDraw}
+      onMouseMove={draw}
+      onMouseUp={stopDraw}
+      onMouseLeave={stopDraw}
+      onTouchStart={startDraw}
+      onTouchMove={draw}
+      onTouchEnd={stopDraw}
+    />
+  );
+}
+
+function SignaturePad({
+  fullName,
+  onSignatureReady,
+}: {
+  fullName: string;
+  onSignatureReady: (dataUrl: string | null) => void;
+}) {
+  const [mode, setMode] = useState<"draw" | "type">("draw");
+  const [hasDrawn, setHasDrawn] = useState(false);
+  const [fontIdx, setFontIdx] = useState(0);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const clearCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setHasDrawn(false);
+    onSignatureReady(null);
+  }, [onSignatureReady]);
+
+  const exportSignature = useCallback((): string | null => {
+    if (mode === "draw") {
+      const canvas = canvasRef.current;
+      if (!canvas || !hasDrawn) return null;
+      return canvas.toDataURL("image/png");
+    }
+    if (!fullName.trim()) return null;
+    const tmp = document.createElement("canvas");
+    tmp.width = 500;
+    tmp.height = 120;
+    const ctx = tmp.getContext("2d");
+    if (!ctx) return null;
+    ctx.fillStyle = "#1a365d";
+    ctx.font = `italic 36px ${SIGNATURE_FONTS[fontIdx]?.value ?? "cursive"}`;
+    ctx.textBaseline = "middle";
+    ctx.fillText(fullName, 16, 60);
+    return tmp.toDataURL("image/png");
+  }, [mode, hasDrawn, fullName, fontIdx]);
+
+  useEffect(() => {
+    if (mode === "draw") {
+      onSignatureReady(hasDrawn ? exportSignature() : null);
+    } else {
+      onSignatureReady(fullName.trim() ? exportSignature() : null);
+    }
+  }, [mode, hasDrawn, fullName, fontIdx, exportSignature, onSignatureReady]);
+
+  return (
+    <div>
+      <div className="mb-3 flex gap-1 rounded-lg bg-gray-100 p-1">
+        <button
+          type="button"
+          onClick={() => { setMode("draw"); clearCanvas(); }}
+          className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+            mode === "draw"
+              ? "bg-white text-blue-700 shadow-sm"
+              : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          <PenLine className="h-4 w-4" />
+          Draw
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("type")}
+          className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+            mode === "type"
+              ? "bg-white text-blue-700 shadow-sm"
+              : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          <Type className="h-4 w-4" />
+          Type
+        </button>
+      </div>
+
+      {mode === "draw" ? (
+        <div>
+          <DrawPad canvasRef={canvasRef} onDrawn={() => setHasDrawn(true)} />
+          <div className="mt-2 flex items-center justify-between">
+            <p className="text-xs text-gray-400">
+              Draw your signature using your mouse or finger
+            </p>
+            <button
+              type="button"
+              onClick={clearCanvas}
+              className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+            >
+              <Eraser className="h-3 w-3" />
+              Clear
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <div className="mb-3 flex gap-2">
+            {SIGNATURE_FONTS.map((f, i) => (
+              <button
+                key={f.label}
+                type="button"
+                onClick={() => setFontIdx(i)}
+                className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  fontIdx === i
+                    ? "border-blue-300 bg-blue-50 text-blue-700"
+                    : "border-gray-200 text-gray-500 hover:border-gray-300"
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex h-[120px] items-center rounded-lg border-2 border-dashed border-gray-300 bg-white px-4">
+            {fullName.trim() ? (
+              <span
+                className="text-[36px] italic"
+                style={{
+                  fontFamily: SIGNATURE_FONTS[fontIdx]?.value ?? "cursive",
+                  color: "#1a365d",
+                }}
+              >
+                {fullName}
+              </span>
+            ) : (
+              <span className="text-sm text-gray-300">
+                Your name will appear here as a signature
+              </span>
+            )}
+          </div>
+          <p className="mt-2 text-xs text-gray-400">
+            Select a style and your typed name will be used as your signature
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const paymentStatusColors: Record<string, string> = {
   COMPLETED: "bg-green-100 text-green-700",
   PENDING: "bg-yellow-100 text-yellow-700",
@@ -82,6 +315,9 @@ export default function LeaseDetail() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [actionError, setActionError] = useState<string | null>(null);
+  const [showCountersignModal, setShowCountersignModal] = useState(false);
+  const [csFullName, setCsFullName] = useState("");
+  const [csSignatureImage, setCsSignatureImage] = useState<string | null>(null);
 
   const {
     data: lease,
@@ -117,18 +353,24 @@ export default function LeaseDetail() {
   });
 
   const countersign = useMutation({
-    mutationFn: (fullName: string) =>
+    mutationFn: (data: { fullName: string; signatureImage?: string | null }) =>
       api(`/leases/${id}/countersign`, {
         method: "POST",
-        body: JSON.stringify({ fullName }),
+        body: JSON.stringify({
+          fullName: data.fullName,
+          ...(data.signatureImage ? { signatureImage: data.signatureImage } : {}),
+        }),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["lease", id] });
       setActionError(null);
+      setShowCountersignModal(false);
+      setCsFullName("");
+      setCsSignatureImage(null);
     },
     onError: (err: any) =>
       setActionError(
-        err?.data?.error ?? err?.message ?? "Failed to countersign"
+        err?.data?.error?.message ?? err?.data?.error ?? err?.message ?? "Failed to countersign"
       ),
   });
 
@@ -173,11 +415,15 @@ export default function LeaseDetail() {
   };
 
   const handleCountersign = () => {
-    const name = window.prompt(
-      "Enter your full legal name to countersign this lease:"
-    );
-    if (!name?.trim()) return;
-    countersign.mutate(name.trim());
+    setShowCountersignModal(true);
+  };
+
+  const handleCountersignSubmit = () => {
+    if (!csFullName.trim() || !csSignatureImage) return;
+    countersign.mutate({
+      fullName: csFullName.trim(),
+      signatureImage: csSignatureImage,
+    });
   };
 
   const handleTerminate = () => {
@@ -741,6 +987,123 @@ export default function LeaseDetail() {
           </div>
         )}
       </div>
+
+      {/* Countersign Modal */}
+      {showCountersignModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">
+                Countersign Lease
+              </h2>
+              <button
+                onClick={() => {
+                  setShowCountersignModal(false);
+                  setCsFullName("");
+                  setCsSignatureImage(null);
+                }}
+                className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <p className="mt-2 text-sm text-gray-500">
+              As the landlord, sign below to finalize this lease agreement.
+              Your electronic signature carries the same legal weight as a
+              handwritten signature under the ESIGN Act.
+            </p>
+
+            <div className="mt-5 space-y-4">
+              <div>
+                <label
+                  htmlFor="csFullName"
+                  className="block text-sm font-medium text-gray-700"
+                >
+                  Full Legal Name
+                </label>
+                <input
+                  id="csFullName"
+                  type="text"
+                  value={csFullName}
+                  onChange={(e) => setCsFullName(e.target.value)}
+                  placeholder="Enter your full legal name"
+                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700">
+                  Your Signature
+                </label>
+                <SignaturePad
+                  fullName={csFullName}
+                  onSignatureReady={setCsSignatureImage}
+                />
+              </div>
+
+              <div className="rounded-lg bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                <span className="font-medium">Signing date:</span>{" "}
+                {new Date().toLocaleString("en-US", {
+                  year: "numeric",
+                  month: "long",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                  timeZoneName: "short",
+                })}
+              </div>
+
+              {actionError && (
+                <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+                  {actionError}
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowCountersignModal(false);
+                    setCsFullName("");
+                    setCsSignatureImage(null);
+                    setActionError(null);
+                  }}
+                  className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCountersignSubmit}
+                  disabled={
+                    !csFullName.trim() ||
+                    !csSignatureImage ||
+                    countersign.isPending
+                  }
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {countersign.isPending ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Signing...
+                    </>
+                  ) : (
+                    <>
+                      <PenLine className="h-4 w-4" />
+                      Sign &amp; Finalize
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <p className="mt-4 text-center text-xs text-gray-400">
+              By signing, you acknowledge that this electronic signature
+              carries the same legal weight as a handwritten signature under
+              the ESIGN Act (15 U.S.C. &sect; 7001).
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

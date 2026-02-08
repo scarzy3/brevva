@@ -48,6 +48,92 @@ import { env } from "../config/env.js";
 
 const router = Router();
 
+/**
+ * Regenerate the lease HTML document with current signature data
+ * and update the stored file. Called after each signature event.
+ */
+async function regenerateLeaseDocument(leaseId: string) {
+  const lease = await prisma.lease.findUnique({
+    where: { id: leaseId },
+    include: {
+      organization: { select: { name: true } },
+      unit: {
+        select: {
+          unitNumber: true,
+          bedrooms: true,
+          bathrooms: true,
+          sqFt: true,
+          property: {
+            select: { name: true, address: true, city: true, state: true, zip: true },
+          },
+        },
+      },
+      tenants: {
+        include: {
+          tenant: {
+            select: { id: true, firstName: true, lastName: true, email: true, phone: true },
+          },
+        },
+      },
+    },
+  });
+  if (!lease) return;
+
+  const clauses = (lease.terms as { clauses?: any[] } | null)?.clauses ?? [];
+  const landlordSigData = lease.landlordSignatureData as Record<string, unknown> | null;
+
+  const html = generateLeaseHTML({
+    leaseId: lease.id,
+    organizationName: lease.organization.name,
+    property: {
+      name: lease.unit.property.name,
+      address: lease.unit.property.address,
+      city: lease.unit.property.city,
+      state: lease.unit.property.state,
+      zip: lease.unit.property.zip,
+    },
+    unit: {
+      unitNumber: lease.unit.unitNumber,
+      bedrooms: lease.unit.bedrooms,
+      bathrooms: Number(lease.unit.bathrooms),
+      sqFt: lease.unit.sqFt,
+    },
+    tenants: lease.tenants.map((lt) => ({
+      id: lt.tenant.id,
+      firstName: lt.tenant.firstName,
+      lastName: lt.tenant.lastName,
+      email: lt.tenant.email,
+      phone: lt.tenant.phone,
+      isPrimary: lt.isPrimary,
+      signedAt: lt.signedAt?.toISOString() ?? null,
+      signatureData: lt.signatureData as any ?? null,
+    })),
+    startDate: lease.startDate.toISOString(),
+    endDate: lease.endDate.toISOString(),
+    monthlyRent: Number(lease.monthlyRent),
+    securityDeposit: Number(lease.securityDeposit),
+    lateFeeAmount: lease.lateFeeAmount ? Number(lease.lateFeeAmount) : null,
+    lateFeeType: lease.lateFeeType,
+    gracePeriodDays: lease.gracePeriodDays,
+    rentDueDay: lease.rentDueDay,
+    clauses,
+    landlordSignature: landlordSigData
+      ? {
+          fullName: landlordSigData["fullName"] as string,
+          timestamp: landlordSigData["timestamp"] as string,
+          ip: landlordSigData["ip"] as string | undefined,
+          signatureImage: landlordSigData["signatureImage"] as string | undefined,
+        }
+      : null,
+  });
+
+  const { url, hash } = saveLeaseDocument(html, lease.id);
+  await prisma.lease.update({
+    where: { id: lease.id },
+    data: { documentUrl: url, documentHash: hash },
+  });
+}
+
 // ─── Public route: token-based signing (NO auth required) ──────────
 // This must be defined BEFORE the auth middleware
 router.get(
@@ -148,7 +234,7 @@ router.post(
   validate({ params: signingTokenParamSchema, body: tokenSignLeaseSchema }),
   asyncHandler(async (req, res) => {
     const token = param(req, "token");
-    const body = req.body as { fullName: string; email: string; agreedToTerms: true; agreedToEsign: true };
+    const body = req.body as { fullName: string; email: string; agreedToTerms: true; agreedToEsign: true; signatureImage?: string };
 
     const leaseTenant = await prisma.leaseTenant.findFirst({
       where: { signingToken: token },
@@ -218,6 +304,7 @@ router.post(
       documentHash: lease.documentHash ?? "",
       hash: signatureHash,
       timestamp: now.toISOString(),
+      ...(body.signatureImage ? { signatureImage: body.signatureImage } : {}),
     };
 
     // Update the lease-tenant with signature, clear the token
@@ -279,6 +366,9 @@ router.post(
       }).catch(() => {});
     }
 
+    // Regenerate lease document with the new signature
+    await regenerateLeaseDocument(lease.id);
+
     // Create audit log entry (no auth user for token-based, use tenant info)
     prisma.auditLog
       .create({
@@ -294,6 +384,12 @@ router.post(
       })
       .catch(() => {});
 
+    // Fetch updated document URL after regeneration
+    const updatedLease = await prisma.lease.findUnique({
+      where: { id: lease.id },
+      select: { documentUrl: true },
+    });
+
     res.json({
       message:
         leaseStatus === "ACTIVE"
@@ -303,7 +399,7 @@ router.post(
       signedAt: signatureData.timestamp,
       allSigned: unsignedCount === 0,
       remainingSignatures: unsignedCount,
-      documentUrl: lease.documentUrl,
+      documentUrl: updatedLease?.documentUrl ?? lease.documentUrl,
     });
   })
 );
@@ -897,6 +993,7 @@ router.post(
       documentHash: lease.documentHash ?? "",
       hash: signatureHash,
       timestamp: new Date().toISOString(),
+      ...(body.signatureImage ? { signatureImage: body.signatureImage } : {}),
     };
 
     // Update the lease-tenant with signature
@@ -941,6 +1038,9 @@ router.post(
       leaseStatus = "ACTIVE";
     }
 
+    // Regenerate lease document with the new signature
+    await regenerateLeaseDocument(lease.id);
+
     res.json({
       message:
         leaseStatus === "ACTIVE"
@@ -963,7 +1063,7 @@ router.post(
   auditLog("COUNTERSIGN", "Lease"),
   asyncHandler(async (req, res) => {
     const orgId = req.organizationId!;
-    const body = req.body as { fullName: string };
+    const body = req.body as { fullName: string; signatureImage?: string };
 
     const lease = await prisma.lease.findFirst({
       where: { id: param(req, "id"), organizationId: orgId },
@@ -999,6 +1099,7 @@ router.post(
       userAgent: req.headers["user-agent"] ?? "unknown",
       documentHash: lease.documentHash ?? "",
       timestamp: now.toISOString(),
+      ...(body.signatureImage ? { signatureImage: body.signatureImage } : {}),
     };
 
     await prisma.lease.update({
@@ -1008,6 +1109,9 @@ router.post(
         landlordSignatureData: landlordSignatureData as unknown as Prisma.InputJsonValue,
       },
     });
+
+    // Regenerate lease document with landlord signature
+    await regenerateLeaseDocument(lease.id);
 
     res.json({
       message: "Lease countersigned successfully",
