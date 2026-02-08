@@ -5,6 +5,11 @@ node_modules/
 dist/
 build/
 .next/
+*.tsbuildinfo
+
+# TypeScript build artifacts (tsc -b emits .js next to .tsx sources)
+packages/web/src/**/*.js
+packages/portal/src/**/*.js
 
 # Environment
 .env
