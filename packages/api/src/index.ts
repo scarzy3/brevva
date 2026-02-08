@@ -12,6 +12,8 @@ import {
   unitNestedRouter,
   unitStandaloneRouter,
 } from "./routes/units.js";
+import tenantRoutes from "./routes/tenants.js";
+import leaseRoutes from "./routes/leases.js";
 
 const app = express();
 
@@ -82,6 +84,8 @@ app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/properties", propertyRoutes);
 app.use("/api/v1/properties/:propertyId/units", unitNestedRouter);
 app.use("/api/v1/units", unitStandaloneRouter);
+app.use("/api/v1/tenants", tenantRoutes);
+app.use("/api/v1/leases", leaseRoutes);
 
 // ─── 8. 404 handler ──────────────────────────────────────────────────
 app.use((_req, res) => {
