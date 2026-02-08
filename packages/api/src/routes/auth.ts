@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { randomBytes } from "crypto";
 import bcrypt from "bcryptjs";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../lib/async-handler.js";
@@ -16,6 +17,7 @@ import {
 } from "../lib/errors.js";
 import { validate } from "../middleware/validate.js";
 import { authenticate } from "../middleware/auth.js";
+import { sendEmail, buildPasswordResetEmail } from "../services/email.js";
 import {
   registerSchema,
   loginSchema,
@@ -315,13 +317,26 @@ router.post(
     const user = await prisma.user.findUnique({ where: { email } });
 
     if (user) {
-      // In production, this would queue an email job with a reset token.
-      // For now, we log it. The actual email sending will be implemented
-      // with the Mailgun integration.
-      const resetToken = generateRefreshToken();
-      console.log(
-        `[DEV] Password reset token for ${email}: ${resetToken.slice(0, 20)}...`
-      );
+      const resetToken = randomBytes(32).toString("hex");
+      const resetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordResetToken: resetToken,
+          passwordResetExpires: resetExpires,
+        },
+      });
+
+      // Determine the correct frontend URL based on user role
+      const frontendUrl = user.role === "TENANT" ? env.PORTAL_URL : env.WEB_URL;
+      const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
+
+      const emailContent = buildPasswordResetEmail({
+        recipientName: `${user.firstName} ${user.lastName}`,
+        resetUrl,
+      });
+      sendEmail({ to: user.email, ...emailContent }).catch(() => {});
     }
 
     res.json({
@@ -338,11 +353,33 @@ router.post(
   asyncHandler(async (req, res) => {
     const { token, password } = req.body as ResetPasswordInput;
 
-    // In production, this would validate the reset token from a store.
-    // For now, return an error since we haven't implemented token storage.
-    throw new ValidationError(
-      "Password reset is not yet fully implemented. Please contact support."
-    );
+    const user = await prisma.user.findFirst({
+      where: {
+        passwordResetToken: token,
+        passwordResetExpires: { gt: new Date() },
+      },
+    });
+
+    if (!user) {
+      throw new ValidationError(
+        "Invalid or expired reset token. Please request a new password reset."
+      );
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        passwordResetToken: null,
+        passwordResetExpires: null,
+      },
+    });
+
+    res.json({
+      message: "Password has been reset successfully. You can now log in with your new password.",
+    });
   })
 );
 
