@@ -20,6 +20,13 @@ export const unitListQuerySchema = paginationSchema.extend({
   status: z.enum(["VACANT", "OCCUPIED", "MAINTENANCE", "LISTED"]).optional(),
 });
 
+export const unitListAllQuerySchema = paginationSchema.extend({
+  status: z.enum(["VACANT", "OCCUPIED", "MAINTENANCE", "LISTED"]).optional(),
+  propertyId: z.string().uuid().optional(),
+});
+
+export type UnitListAllQuery = z.infer<typeof unitListAllQuerySchema>;
+
 export const unitParamsSchema = z.object({
   propertyId: z.string().uuid(),
 });
