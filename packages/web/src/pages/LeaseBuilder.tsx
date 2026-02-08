@@ -427,8 +427,8 @@ function StepTenants({
     },
     onError: (err: any) => {
       const msg =
-        err?.data?.message || err?.data?.error || "Failed to create tenant";
-      toast(msg, "error");
+        err?.data?.error?.message || err?.data?.message || "Failed to create tenant";
+      toast(String(msg), "error");
     },
   });
 
@@ -1479,29 +1479,31 @@ export default function LeaseBuilder() {
 
   // Build lease payload
   const buildPayload = useCallback(
-    (status: string) => ({
-      unitId: selectedUnit!.id,
-      tenants: selectedTenants.map((t) => ({
-        tenantId: t.id,
-        isPrimary: t.isPrimary,
-      })),
-      startDate: terms.startDate,
-      endDate: terms.endDate,
-      monthlyRent: terms.monthlyRent,
-      securityDeposit: terms.securityDeposit,
-      lateFeeAmount: terms.lateFeeAmount,
-      lateFeeType: terms.lateFeeType,
-      gracePeriodDays: terms.gracePeriodDays,
-      rentDueDay: terms.rentDueDay,
-      status,
-      clauses: clauses
-        .filter((c) => c.enabled)
-        .map((c, idx) => ({
-          title: c.title,
-          content: c.content,
-          order: idx,
-        })),
-    }),
+    () => {
+      const primary = selectedTenants.find((t) => t.isPrimary);
+      return {
+        unitId: selectedUnit!.id,
+        tenantIds: selectedTenants.map((t) => t.id),
+        primaryTenantId: primary?.id ?? selectedTenants[0]?.id,
+        startDate: terms.startDate,
+        endDate: terms.endDate,
+        monthlyRent: terms.monthlyRent,
+        securityDeposit: terms.securityDeposit,
+        lateFeeAmount: terms.lateFeeAmount,
+        lateFeeType: terms.lateFeeType,
+        gracePeriodDays: terms.gracePeriodDays,
+        rentDueDay: terms.rentDueDay,
+        terms: {
+          clauses: clauses
+            .filter((c) => c.enabled)
+            .map((c, idx) => ({
+              title: c.title,
+              content: c.content,
+              order: idx,
+            })),
+        },
+      };
+    },
     [selectedUnit, selectedTenants, terms, clauses],
   );
 
@@ -1510,7 +1512,7 @@ export default function LeaseBuilder() {
     mutationFn: () =>
       api<{ id: string }>("/leases", {
         method: "POST",
-        body: JSON.stringify(buildPayload("DRAFT")),
+        body: JSON.stringify(buildPayload()),
       }),
     onSuccess: (data) => {
       toast("Lease saved as draft");
@@ -1518,8 +1520,8 @@ export default function LeaseBuilder() {
     },
     onError: (err: any) => {
       const msg =
-        err?.data?.message || err?.data?.error || "Failed to save lease";
-      toast(msg, "error");
+        err?.data?.error?.message || err?.data?.message || "Failed to save lease";
+      toast(String(msg), "error");
     },
   });
 
@@ -1528,7 +1530,7 @@ export default function LeaseBuilder() {
     mutationFn: async () => {
       const lease = await api<{ id: string }>("/leases", {
         method: "POST",
-        body: JSON.stringify(buildPayload("PENDING_SIGNATURE")),
+        body: JSON.stringify(buildPayload()),
       });
       await api(`/leases/${lease.id}/send-for-signature`, {
         method: "POST",
@@ -1541,8 +1543,8 @@ export default function LeaseBuilder() {
     },
     onError: (err: any) => {
       const msg =
-        err?.data?.message || err?.data?.error || "Failed to send lease";
-      toast(msg, "error");
+        err?.data?.error?.message || err?.data?.message || "Failed to send lease";
+      toast(String(msg), "error");
     },
   });
 
