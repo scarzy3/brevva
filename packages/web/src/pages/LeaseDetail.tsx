@@ -34,7 +34,8 @@ function currency(n: number) {
   }).format(n);
 }
 
-function fmtDate(d: string) {
+function fmtDate(d: string | null | undefined) {
+  if (!d) return "\u2014";
   return new Date(d).toLocaleDateString("en-US", {
     year: "numeric",
     month: "short",
@@ -42,7 +43,8 @@ function fmtDate(d: string) {
   });
 }
 
-function fmtDateTime(d: string) {
+function fmtDateTime(d: string | null | undefined) {
+  if (!d) return "\u2014";
   return new Date(d).toLocaleString("en-US", {
     year: "numeric",
     month: "short",
@@ -305,7 +307,7 @@ export default function LeaseDetail() {
               Monthly Rent
             </div>
             <p className="mt-1 text-sm font-bold">
-              {currency(Number(lease.monthlyRent))}
+              {currency(Number(lease.monthlyRent ?? 0))}
             </p>
           </div>
           <div className="rounded-lg bg-gray-50 p-3">
@@ -314,7 +316,7 @@ export default function LeaseDetail() {
               Security Deposit
             </div>
             <p className="mt-1 text-sm font-bold">
-              {currency(Number(lease.securityDeposit))}
+              {currency(Number(lease.securityDeposit ?? 0))}
             </p>
           </div>
           {lease.lateFeeAmount != null && (
@@ -717,7 +719,7 @@ export default function LeaseDetail() {
                       {fmtDate(p.paidAt ?? p.createdAt)}
                     </td>
                     <td className="py-2.5 pr-4 font-medium">
-                      {currency(Number(p.amount))}
+                      {currency(Number(p.amount ?? 0))}
                     </td>
                     <td className="py-2.5 pr-4 text-gray-500">
                       {p.method ?? "--"}
