@@ -84,9 +84,9 @@ export default function Leases() {
                   <td className="px-4 py-3 text-gray-500">
                     {(l.tenants ?? []).map((lt: any) => `${lt.tenant?.firstName} ${lt.tenant?.lastName}`).join(", ") || "\u2014"}
                   </td>
-                  <td className="px-4 py-3 font-medium">{currency(Number(l.monthlyRent))}</td>
-                  <td className="px-4 py-3 text-gray-500">{new Date(l.startDate).toLocaleDateString()}</td>
-                  <td className="px-4 py-3 text-gray-500">{new Date(l.endDate).toLocaleDateString()}</td>
+                  <td className="px-4 py-3 font-medium">{currency(Number(l.monthlyRent ?? 0))}</td>
+                  <td className="px-4 py-3 text-gray-500">{l.startDate ? new Date(l.startDate).toLocaleDateString() : "\u2014"}</td>
+                  <td className="px-4 py-3 text-gray-500">{l.endDate ? new Date(l.endDate).toLocaleDateString() : "\u2014"}</td>
                   <td className="px-4 py-3">
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusColors[l.status] ?? "bg-gray-100 text-gray-600"}`}>
                       {l.status}
