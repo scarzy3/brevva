@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface AddressResult {
   address: string;
@@ -24,8 +24,12 @@ const GOOGLE_MAPS_API_KEY = import.meta.env["VITE_GOOGLE_MAPS_API_KEY"] as
 
 let loadPromise: Promise<void> | null = null;
 
+/**
+ * Load the Google Maps JS API with loading=async and then import the "places"
+ * library which registers the PlaceAutocompleteElement web component.
+ */
 function loadGoogleMapsScript(): Promise<void> {
-  if (window.google?.maps?.places) return Promise.resolve();
+  if (window.google?.maps?.importLibrary != null) return Promise.resolve();
   if (loadPromise) return loadPromise;
 
   loadPromise = new Promise<void>((resolve, reject) => {
@@ -34,7 +38,7 @@ function loadGoogleMapsScript(): Promise<void> {
       return;
     }
     const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&loading=async`;
     script.async = true;
     script.defer = true;
     script.onload = () => resolve();
@@ -48,10 +52,8 @@ function loadGoogleMapsScript(): Promise<void> {
   return loadPromise;
 }
 
-function parsePlace(
-  place: google.maps.places.PlaceResult,
-): AddressResult | null {
-  const components = place.address_components;
+function parsePlace(place: google.maps.places.Place): AddressResult | null {
+  const components = place.addressComponents;
   if (!components) return null;
 
   let streetNumber = "";
@@ -62,12 +64,13 @@ function parsePlace(
 
   for (const c of components) {
     const type = c.types[0];
-    if (type === "street_number") streetNumber = c.long_name;
-    else if (type === "route") route = c.long_name;
-    else if (type === "locality") city = c.long_name;
-    else if (type === "sublocality_level_1" && !city) city = c.long_name;
-    else if (type === "administrative_area_level_1") state = c.short_name;
-    else if (type === "postal_code") zip = c.long_name;
+    if (type === "street_number") streetNumber = c.longText ?? "";
+    else if (type === "route") route = c.longText ?? "";
+    else if (type === "locality") city = c.longText ?? "";
+    else if (type === "sublocality_level_1" && !city) city = c.longText ?? "";
+    else if (type === "administrative_area_level_1")
+      state = c.shortText ?? "";
+    else if (type === "postal_code") zip = c.longText ?? "";
   }
 
   const address = streetNumber ? `${streetNumber} ${route}` : route;
@@ -77,9 +80,9 @@ function parsePlace(
     city,
     state,
     zip,
-    fullAddress: place.formatted_address || "",
-    lat: place.geometry?.location?.lat(),
-    lng: place.geometry?.location?.lng(),
+    fullAddress: place.formattedAddress ?? "",
+    lat: place.location?.lat(),
+    lng: place.location?.lng(),
   };
 }
 
@@ -93,9 +96,9 @@ export default function AddressAutocomplete({
   className,
   error,
 }: AddressAutocompleteProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
-  const [apiReady, setApiReady] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const elementRef =
+    useRef<google.maps.places.PlaceAutocompleteElement | null>(null);
   const [loadError, setLoadError] = useState(false);
   const onAddressSelectRef = useRef(onAddressSelect);
   onAddressSelectRef.current = onAddressSelect;
@@ -105,51 +108,135 @@ export default function AddressAutocomplete({
       setLoadError(true);
       return;
     }
-    loadGoogleMapsScript()
-      .then(() => setApiReady(true))
-      .catch(() => setLoadError(true));
-  }, []);
 
-  const initAutocomplete = useCallback(() => {
-    if (!inputRef.current || !apiReady || autocompleteRef.current) return;
+    let cancelled = false;
 
-    const ac = new google.maps.places.Autocomplete(inputRef.current, {
-      types: ["address"],
-      componentRestrictions: { country: "us" },
-      fields: ["address_components", "formatted_address", "geometry"],
-    });
+    (async () => {
+      try {
+        await loadGoogleMapsScript();
+        // Import the places library to register the web component
+        await google.maps.importLibrary("places");
 
-    ac.addListener("place_changed", () => {
-      const place = ac.getPlace();
-      if (!place.address_components) return;
-      const result = parsePlace(place);
-      if (result) onAddressSelectRef.current(result);
-    });
+        if (cancelled || !containerRef.current) return;
 
-    autocompleteRef.current = ac;
-  }, [apiReady]);
+        const el = new google.maps.places.PlaceAutocompleteElement({
+          types: ["address"],
+          componentRestrictions: { country: "us" },
+        });
 
-  useEffect(() => {
-    initAutocomplete();
+        // Style the inner input via the ::part(input) pseudo-element.
+        // We inject a <style> scoped to our container to target the web
+        // component's shadow DOM parts.
+        const style = document.createElement("style");
+        const appliedClass = className || inputCls;
+        // Convert the Tailwind class list into CSS applied via ::part.
+        // Since ::part cannot use utility classes directly, we apply baseline
+        // styles that match the form inputs and let the wrapper div handle
+        // width.
+        style.textContent = `
+          gmp-placeautocomplete {
+            display: block;
+            width: 100%;
+          }
+          gmp-placeautocomplete::part(input) {
+            width: 100%;
+            border-radius: 0.5rem;
+            border: 1px solid #d1d5db;
+            padding: 0.5rem 0.75rem;
+            font-size: 0.875rem;
+            line-height: 1.25rem;
+            outline: none;
+            box-sizing: border-box;
+          }
+          gmp-placeautocomplete::part(input):focus {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px #bfdbfe;
+          }
+        `;
+        containerRef.current.appendChild(style);
+
+        // If a className was provided, add it to the element itself so the
+        // caller can control wrapper-level layout (e.g. width).
+        if (className) {
+          el.className = appliedClass;
+        }
+
+        el.addEventListener("gmp-placeselect", ((
+          e: google.maps.places.PlaceAutocompletePlaceSelectEvent,
+        ) => {
+          const place = e.place;
+          void (async () => {
+            try {
+              await place.fetchFields({
+                fields: [
+                  "addressComponents",
+                  "formattedAddress",
+                  "location",
+                ],
+              });
+            } catch {
+              // If fetchFields fails, we still try to parse what we have
+            }
+            const result = parsePlace(place);
+            if (result) onAddressSelectRef.current(result);
+          })();
+        }) as EventListener);
+
+        containerRef.current.appendChild(el);
+        elementRef.current = el;
+
+        // Set placeholder via the underlying input
+        const inner = el.querySelector("input");
+        if (inner) {
+          inner.placeholder = placeholder;
+          if (defaultValue) inner.value = defaultValue;
+        } else {
+          // The shadow DOM input may not be immediately queryable — wait for
+          // the custom element to upgrade.
+          requestAnimationFrame(() => {
+            const inp = el.querySelector("input");
+            if (inp) {
+              inp.placeholder = placeholder;
+              if (defaultValue) inp.value = defaultValue;
+            }
+          });
+        }
+      } catch {
+        if (!cancelled) setLoadError(true);
+      }
+    })();
+
     return () => {
-      if (autocompleteRef.current) {
-        google.maps.event.clearInstanceListeners(autocompleteRef.current);
-        autocompleteRef.current = null;
+      cancelled = true;
+      if (elementRef.current && containerRef.current) {
+        containerRef.current
+          .querySelectorAll("style, gmp-placeautocomplete")
+          .forEach((n) => n.remove());
+        elementRef.current = null;
       }
     };
-  }, [initAutocomplete]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const appliedClass = className || inputCls;
 
+  if (loadError) {
+    return (
+      <div>
+        <input
+          type="text"
+          defaultValue={defaultValue}
+          placeholder="Enter address manually"
+          className={appliedClass}
+        />
+        {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+      </div>
+    );
+  }
+
   return (
     <div>
-      <input
-        ref={inputRef}
-        type="text"
-        defaultValue={defaultValue}
-        placeholder={loadError ? "Enter address manually" : placeholder}
-        className={appliedClass}
-      />
+      <div ref={containerRef} />
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>
   );
