@@ -97,6 +97,20 @@ export const countersignLeaseSchema = z.object({
   signingMetadata: signingMetadataSchema.optional(),
 });
 
+// E-signature for addendums (token-based, no auth — no identity confirmation)
+export const tokenSignAddendumSchema = z.object({
+  fullName: z.string().min(1).max(200),
+  email: z.string().email(),
+  agreedToTerms: z.literal(true, {
+    errorMap: () => ({ message: "You must agree to the addendum terms" }),
+  }),
+  agreedToEsign: z.literal(true, {
+    errorMap: () => ({ message: "You must agree to use electronic signatures" }),
+  }),
+  signatureImage: z.string().max(100000).optional(),
+  signingMetadata: signingMetadataSchema.optional(),
+});
+
 // Addendums
 export const createAddendumSchema = z.object({
   title: z.string().min(1).max(200),
