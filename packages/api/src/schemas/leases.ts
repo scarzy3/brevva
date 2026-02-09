@@ -50,20 +50,23 @@ export const signLeaseSchema = z.object({
 });
 
 // Browser-side metadata collected during signing
+// Fields use .nullable() because the frontend initializes timestamps as
+// string | null and JSON.stringify preserves null (Zod .optional() only
+// accepts undefined, not null).
 const signingMetadataSchema = z.object({
-  screenResolution: z.string().max(50).optional(),
-  timezone: z.string().max(100).optional(),
-  browserLanguage: z.string().max(50).optional(),
-  platform: z.string().max(100).optional(),
-  pageOpenedAt: z.string().max(50).optional(),
-  documentViewedAt: z.string().max(50).optional(),
-  scrolledToBottomAt: z.string().max(50).optional(),
-  consent1CheckedAt: z.string().max(50).optional(),
-  consent2CheckedAt: z.string().max(50).optional(),
-  consent3CheckedAt: z.string().max(50).optional(),
-  nameTypedAt: z.string().max(50).optional(),
-  signedAt: z.string().max(50).optional(),
-  totalViewTimeSeconds: z.number().min(0).optional(),
+  screenResolution: z.string().max(50).nullable().optional(),
+  timezone: z.string().max(100).nullable().optional(),
+  browserLanguage: z.string().max(50).nullable().optional(),
+  platform: z.string().max(100).nullable().optional(),
+  pageOpenedAt: z.string().max(50).nullable().optional(),
+  documentViewedAt: z.string().max(50).nullable().optional(),
+  scrolledToBottomAt: z.string().max(50).nullable().optional(),
+  consent1CheckedAt: z.string().max(50).nullable().optional(),
+  consent2CheckedAt: z.string().max(50).nullable().optional(),
+  consent3CheckedAt: z.string().max(50).nullable().optional(),
+  nameTypedAt: z.string().max(50).nullable().optional(),
+  signedAt: z.string().max(50).nullable().optional(),
+  totalViewTimeSeconds: z.number().min(0).nullable().optional(),
 });
 
 // E-signature (token-based, no auth)
@@ -176,16 +179,16 @@ export const countersignAddendumSchema = z.object({
   agreedToTerms: z.literal(true).optional(),
   agreedToEsign: z.literal(true).optional(),
   signingMetadata: z.object({
-    screenResolution: z.string().max(50).optional(),
-    timezone: z.string().max(100).optional(),
-    browserLanguage: z.string().max(50).optional(),
-    platform: z.string().max(100).optional(),
-    pageOpenedAt: z.string().max(50).optional(),
-    consent1CheckedAt: z.string().max(50).optional(),
-    consent2CheckedAt: z.string().max(50).optional(),
-    nameTypedAt: z.string().max(50).optional(),
-    signedAt: z.string().max(50).optional(),
-    totalViewTimeSeconds: z.number().min(0).optional(),
+    screenResolution: z.string().max(50).nullable().optional(),
+    timezone: z.string().max(100).nullable().optional(),
+    browserLanguage: z.string().max(50).nullable().optional(),
+    platform: z.string().max(100).nullable().optional(),
+    pageOpenedAt: z.string().max(50).nullable().optional(),
+    consent1CheckedAt: z.string().max(50).nullable().optional(),
+    consent2CheckedAt: z.string().max(50).nullable().optional(),
+    nameTypedAt: z.string().max(50).nullable().optional(),
+    signedAt: z.string().max(50).nullable().optional(),
+    totalViewTimeSeconds: z.number().min(0).nullable().optional(),
   }).optional(),
 });
 
