@@ -16,6 +16,10 @@ import {
   Eraser,
   PenLine,
   Type,
+  X,
+  MapPin,
+  Hash,
+  Mail,
 } from "lucide-react";
 
 function currency(n: number) {
@@ -281,6 +285,96 @@ function SignaturePad({
 }
 
 // ---------------------------------------------------------------------------
+// Confirmation Modal
+// ---------------------------------------------------------------------------
+function ConfirmSignModal({
+  open,
+  onClose,
+  onConfirm,
+  signing,
+  propertyAddress,
+  monthlyRent,
+  startDate,
+  endDate,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  signing: boolean;
+  propertyAddress: string;
+  monthlyRent: number;
+  startDate: string;
+  endDate: string;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold text-gray-900">Confirm Your Signature</h3>
+          <button
+            onClick={onClose}
+            disabled={signing}
+            className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="mb-4">
+          <p className="text-sm text-gray-700 font-medium mb-3">
+            You are about to electronically sign this document.
+          </p>
+          <div className="space-y-2 rounded-lg bg-gray-50 p-4 text-sm">
+            <div className="flex justify-between">
+              <span className="text-gray-500">Property:</span>
+              <span className="font-medium text-gray-900 text-right ml-4">{propertyAddress}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Monthly Rent:</span>
+              <span className="font-medium text-gray-900">{currency(monthlyRent)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Lease Term:</span>
+              <span className="font-medium text-gray-900">{fmtDate(startDate)} to {fmtDate(endDate)}</span>
+            </div>
+          </div>
+        </div>
+
+        <p className="text-sm text-red-600 font-medium mb-5">
+          This signature is legally binding and cannot be undone.
+        </p>
+
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            disabled={signing}
+            className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={signing}
+            className="flex-1 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {signing ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Signing...
+              </>
+            ) : (
+              "Confirm & Sign"
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 interface SigningData {
@@ -322,6 +416,21 @@ interface SigningData {
     isPrimary: boolean;
     signed: boolean;
   }[];
+  signingToken?: {
+    token: string;
+    createdAt: string | null;
+    expiresAt: string | null;
+  };
+}
+
+interface SignatureReceipt {
+  documentId: string;
+  signedBy: string;
+  email: string;
+  signedAt: string;
+  ipAddress: string;
+  location: string | null;
+  signatureId: string;
 }
 
 interface SignResult {
@@ -329,6 +438,7 @@ interface SignResult {
   allSigned: boolean;
   remainingSignatures: number;
   documentUrl?: string | null;
+  signatureReceipt?: SignatureReceipt;
 }
 
 // ---------------------------------------------------------------------------
@@ -337,14 +447,36 @@ interface SignResult {
 export default function SignLease() {
   const { token } = useParams();
 
-  const [agreedToTerms, setAgreedToTerms] = useState(false);
-  const [agreedToEsign, setAgreedToEsign] = useState(false);
+  // Timestamps for interaction tracking
+  const [pageOpenedAt] = useState(() => new Date().toISOString());
+  const [documentViewedAt, setDocumentViewedAt] = useState<string | null>(null);
+  const [scrolledToBottomAt, setScrolledToBottomAt] = useState<string | null>(null);
+  const [consent1CheckedAt, setConsent1CheckedAt] = useState<string | null>(null);
+  const [consent2CheckedAt, setConsent2CheckedAt] = useState<string | null>(null);
+  const [consent3CheckedAt, setConsent3CheckedAt] = useState<string | null>(null);
+  const [nameTypedAt, setNameTypedAt] = useState<string | null>(null);
+
+  // Document scroll tracking
+  const [scrollProgress, setScrollProgress] = useState(0);
+  const [documentFullyViewed, setDocumentFullyViewed] = useState(false);
+  const iframeContainerRef = useRef<HTMLDivElement>(null);
+
+  // Consent checkboxes
+  const [consent1, setConsent1] = useState(false);
+  const [consent2, setConsent2] = useState(false);
+  const [consent3, setConsent3] = useState(false);
+  const allConsented = consent1 && consent2 && consent3;
+
+  // Name and signature
   const [fullName, setFullName] = useState("");
   const [nameInitialized, setNameInitialized] = useState(false);
   const [signatureImage, setSignatureImage] = useState<string | null>(null);
+
+  // UI state
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
   const [signResult, setSignResult] = useState<SignResult | null>(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   const { data, isLoading, error } = useQuery<SigningData>({
     queryKey: ["sign-lease", token],
@@ -367,11 +499,61 @@ export default function SignLease() {
     setNameInitialized(true);
   }
 
-  const handleSign = async () => {
-    if (!agreedToTerms || !agreedToEsign || !fullName.trim() || !signatureImage) return;
+  // Expected name from lease data
+  const expectedName = data
+    ? `${data.tenant.firstName} ${data.tenant.lastName}`
+    : "";
+  const nameMatches = fullName.trim().toLowerCase() === expectedName.toLowerCase();
 
+  // Document scroll tracking via an overlay div
+  const handleDocumentScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      const el = e.currentTarget;
+      const scrollTop = el.scrollTop;
+      const scrollHeight = el.scrollHeight - el.clientHeight;
+      if (scrollHeight <= 0) return;
+      const progress = Math.min(100, Math.round((scrollTop / scrollHeight) * 100));
+      setScrollProgress(progress);
+
+      if (!documentViewedAt && progress > 10) {
+        setDocumentViewedAt(new Date().toISOString());
+      }
+
+      if (!documentFullyViewed && progress >= 95) {
+        setDocumentFullyViewed(true);
+        setScrolledToBottomAt(new Date().toISOString());
+      }
+    },
+    [documentViewedAt, documentFullyViewed]
+  );
+
+  const handleSign = async () => {
+    if (!allConsented || !fullName.trim() || !signatureImage || !nameMatches) return;
+    setShowConfirmModal(true);
+  };
+
+  const confirmSign = async () => {
     setSigning(true);
     setSignError(null);
+
+    const now = new Date().toISOString();
+    const metadata = {
+      screenResolution: `${window.screen.width}x${window.screen.height}`,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      browserLanguage: navigator.language,
+      platform: navigator.platform,
+      pageOpenedAt,
+      documentViewedAt,
+      scrolledToBottomAt,
+      consent1CheckedAt,
+      consent2CheckedAt,
+      consent3CheckedAt,
+      nameTypedAt,
+      signedAt: now,
+      totalViewTimeSeconds: Math.round(
+        (new Date(now).getTime() - new Date(pageOpenedAt).getTime()) / 1000
+      ),
+    };
 
     try {
       const res = await fetch("/api/v1/leases/sign/" + token, {
@@ -382,7 +564,9 @@ export default function SignLease() {
           email: data!.tenant.email,
           agreedToTerms: true,
           agreedToEsign: true,
+          agreedToIdentity: true,
           signatureImage,
+          signingMetadata: metadata,
         }),
       });
 
@@ -394,8 +578,10 @@ export default function SignLease() {
 
       const result: SignResult = await res.json();
       setSignResult(result);
+      setShowConfirmModal(false);
     } catch (err) {
       setSignError(err instanceof Error ? err.message : "An error occurred");
+      setShowConfirmModal(false);
     } finally {
       setSigning(false);
     }
@@ -451,46 +637,114 @@ export default function SignLease() {
 
   const { tenant, lease, unit, organization, tenants } = data;
   const property = unit.property;
+  const propertyAddress = `${property.address}, ${property.city}, ${property.state} ${property.zip}`;
 
-  // --- Success ---
+  // --- Post-Signature Success ---
   if (signResult) {
+    const receipt = signResult.signatureReceipt;
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-        <div className="w-full max-w-lg rounded-xl border bg-white p-8 text-center shadow-sm">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
-            <CheckCircle className="h-10 w-10 text-green-600" />
+        <div className="w-full max-w-lg rounded-xl border bg-white p-8 shadow-sm">
+          {/* Header */}
+          <div className="text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+              <CheckCircle className="h-10 w-10 text-green-600" />
+            </div>
+            <h1 className="mt-4 text-2xl font-bold text-gray-900">Your signature has been recorded</h1>
           </div>
-          <h1 className="mt-6 text-2xl font-bold text-gray-900">Thank You!</h1>
-          <p className="mt-2 text-gray-600">Your lease agreement has been successfully signed.</p>
+
+          {/* Signature Receipt */}
+          {receipt && (
+            <div className="mt-6 rounded-xl border bg-gray-50 p-5">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">Signature Receipt</h3>
+              <div className="space-y-2.5 text-sm">
+                <div className="flex items-start gap-2">
+                  <FileText className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                  <div>
+                    <p className="text-xs text-gray-500">Document</p>
+                    <p className="font-medium text-gray-900">Lease - {propertyAddress}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <PenLine className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                  <div>
+                    <p className="text-xs text-gray-500">Signed by</p>
+                    <p className="font-medium text-gray-900">{receipt.signedBy}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Mail className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                  <div>
+                    <p className="text-xs text-gray-500">Email</p>
+                    <p className="font-medium text-gray-900">{receipt.email}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Calendar className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                  <div>
+                    <p className="text-xs text-gray-500">Date & Time</p>
+                    <p className="font-medium text-gray-900">{fmtDateTime(receipt.signedAt)}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Shield className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                  <div>
+                    <p className="text-xs text-gray-500">IP Address</p>
+                    <p className="font-medium text-gray-900">{receipt.ipAddress}</p>
+                  </div>
+                </div>
+                {receipt.location && (
+                  <div className="flex items-start gap-2">
+                    <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                    <div>
+                      <p className="text-xs text-gray-500">Location</p>
+                      <p className="font-medium text-gray-900">{receipt.location}</p>
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-start gap-2">
+                  <Hash className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                  <div>
+                    <p className="text-xs text-gray-500">Signature ID</p>
+                    <p className="font-mono text-xs font-medium text-gray-900">{receipt.signatureId}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Status */}
           <div className="mt-4 rounded-lg bg-gray-50 p-4 text-sm text-gray-600">
-            <p>
-              Signed on <span className="font-medium">{fmtDateTime(signResult.signedAt)}</span>
-            </p>
             {signResult.remainingSignatures > 0 ? (
-              <p className="mt-1">
+              <p>
                 {signResult.remainingSignatures} other tenant
                 {signResult.remainingSignatures > 1 ? "s" : ""} still need
                 {signResult.remainingSignatures === 1 ? "s" : ""} to sign.
               </p>
             ) : (
-              <p className="mt-1 font-medium text-green-700">
+              <p className="font-medium text-green-700">
                 All tenants have signed. The lease is now active.
               </p>
             )}
           </div>
-          {(signResult.documentUrl ?? lease.documentUrl) && (
-            <a
-              href={signResult.documentUrl ?? lease.documentUrl!}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-6 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              <Download className="h-4 w-4" />
-              Download Lease Document
-            </a>
+
+          {/* Download button */}
+          {signResult.allSigned && (signResult.documentUrl ?? lease.documentUrl) && (
+            <div className="mt-4 text-center">
+              <a
+                href={signResult.documentUrl ?? lease.documentUrl!}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                <Download className="h-4 w-4" />
+                Download Signed Document
+              </a>
+            </div>
           )}
-          <p className="mt-6 text-xs text-gray-400">
-            A confirmation email has been sent to {tenant.email}. You may close this page.
+
+          <p className="mt-6 text-center text-xs text-gray-400">
+            A confirmation will be sent to {tenant.email} when all parties have signed.
           </p>
         </div>
       </div>
@@ -499,7 +753,12 @@ export default function SignLease() {
 
   // --- Main signing page ---
   const canSubmit =
-    agreedToTerms && agreedToEsign && fullName.trim().length > 0 && signatureImage !== null && !signing;
+    documentFullyViewed &&
+    allConsented &&
+    fullName.trim().length > 0 &&
+    nameMatches &&
+    signatureImage !== null &&
+    !signing;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -519,9 +778,7 @@ export default function SignLease() {
       <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">Lease Agreement</h1>
-          <p className="mt-1 text-gray-500">
-            {property.address}, {property.city}, {property.state} {property.zip}
-          </p>
+          <p className="mt-1 text-gray-500">{propertyAddress}</p>
         </div>
 
         {/* Lease Summary */}
@@ -598,9 +855,7 @@ export default function SignLease() {
           </h2>
           <div className="mt-3 text-sm text-gray-700">
             <p className="font-medium">{property.name}</p>
-            <p className="text-gray-500">
-              {property.address}, {property.city}, {property.state} {property.zip}
-            </p>
+            <p className="text-gray-500">{propertyAddress}</p>
             <p className="mt-2">
               <span className="font-medium">Unit:</span> {unit.unitNumber}
               {unit.bedrooms != null && (
@@ -651,78 +906,178 @@ export default function SignLease() {
           </div>
         </div>
 
-        {/* Document Viewer */}
+        {/* Document Viewer with Scroll Tracking */}
         <div className="mb-6 rounded-xl border bg-white p-6 shadow-sm">
           <h2 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
             <FileText className="h-5 w-5 text-blue-600" />
             Lease Document
           </h2>
+
+          {/* Scroll Progress */}
+          <div className="mt-4 mb-3">
+            {documentFullyViewed ? (
+              <div className="flex items-center gap-2 text-sm text-green-700">
+                <CheckCircle className="h-4 w-4" />
+                <span className="font-medium">Document reviewed</span>
+              </div>
+            ) : (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-gray-500 font-medium">
+                    Scroll to review the full document
+                  </span>
+                  <span className="text-xs text-gray-400">{scrollProgress}%</span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-gray-200">
+                  <div
+                    className="h-2 rounded-full bg-blue-500 transition-all duration-200"
+                    style={{ width: `${scrollProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
           {lease.documentUrl ? (
-            <div className="mt-4 overflow-hidden rounded-lg border">
+            <div
+              ref={iframeContainerRef}
+              className="overflow-auto rounded-lg border"
+              style={{ height: 600 }}
+              onScroll={handleDocumentScroll}
+            >
               <iframe
                 src={lease.documentUrl}
                 title="Lease Document"
-                className="h-[600px] w-full"
+                className="w-full"
+                style={{ height: 1800, minHeight: 1800 }}
                 sandbox="allow-same-origin"
               />
             </div>
           ) : (
-            <div className="mt-4 flex items-center justify-center rounded-lg border border-dashed bg-gray-50 py-16">
+            <div className="flex items-center justify-center rounded-lg border border-dashed bg-gray-50 py-16">
               <p className="text-sm text-gray-400">Document preview not available</p>
             </div>
           )}
         </div>
 
         {/* Signature Form */}
-        <div className="rounded-xl border-2 border-blue-200 bg-white p-6 shadow-sm">
+        <div className={`rounded-xl border-2 ${documentFullyViewed ? "border-blue-200" : "border-gray-200"} bg-white p-6 shadow-sm`}>
           <h2 className="text-lg font-semibold text-gray-900">Sign This Lease</h2>
           <p className="mt-1 text-sm text-gray-500">
-            Please review the lease terms above, then complete the fields below to sign
-            electronically.
+            {documentFullyViewed
+              ? "Review and complete the fields below to sign electronically."
+              : "You must scroll through and review the entire document before signing."}
           </p>
 
           <div className="mt-6 space-y-5">
-            <label className="flex cursor-pointer items-start gap-3">
-              <input
-                type="checkbox"
-                checked={agreedToTerms}
-                onChange={(e) => setAgreedToTerms(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              <span className="text-sm text-gray-700">
-                I have read and agree to the terms of this lease agreement
-              </span>
-            </label>
+            {/* Three Consent Checkboxes */}
+            <div className="space-y-3">
+              <label className={`flex cursor-pointer items-start gap-3 ${!documentFullyViewed ? "opacity-50 pointer-events-none" : ""}`}>
+                <input
+                  type="checkbox"
+                  checked={consent1}
+                  disabled={!documentFullyViewed}
+                  onChange={(e) => {
+                    setConsent1(e.target.checked);
+                    if (e.target.checked && !consent1CheckedAt) {
+                      setConsent1CheckedAt(new Date().toISOString());
+                    }
+                  }}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-700">
+                  I have read and understand this lease agreement in its entirety
+                </span>
+              </label>
 
-            <label className="flex cursor-pointer items-start gap-3">
-              <input
-                type="checkbox"
-                checked={agreedToEsign}
-                onChange={(e) => setAgreedToEsign(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              <span className="text-sm text-gray-700">
-                I agree to use electronic signatures as a legally binding method of signing this
-                document
-              </span>
-            </label>
+              <label className={`flex cursor-pointer items-start gap-3 ${!documentFullyViewed ? "opacity-50 pointer-events-none" : ""}`}>
+                <input
+                  type="checkbox"
+                  checked={consent2}
+                  disabled={!documentFullyViewed}
+                  onChange={(e) => {
+                    setConsent2(e.target.checked);
+                    if (e.target.checked && !consent2CheckedAt) {
+                      setConsent2CheckedAt(new Date().toISOString());
+                    }
+                  }}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-700">
+                  I agree to use electronic signatures and acknowledge that my electronic signature
+                  has the same legal effect as a handwritten signature, pursuant to the ESIGN Act
+                  (15 U.S.C. &sect; 7001) and UETA
+                </span>
+              </label>
 
-            <div>
+              <label className={`flex cursor-pointer items-start gap-3 ${!documentFullyViewed ? "opacity-50 pointer-events-none" : ""}`}>
+                <input
+                  type="checkbox"
+                  checked={consent3}
+                  disabled={!documentFullyViewed}
+                  onChange={(e) => {
+                    setConsent3(e.target.checked);
+                    if (e.target.checked && !consent3CheckedAt) {
+                      setConsent3CheckedAt(new Date().toISOString());
+                    }
+                  }}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-700">
+                  I confirm that I am the person identified above and I am signing this document voluntarily
+                </span>
+              </label>
+            </div>
+
+            {/* Name Input */}
+            <div className={!allConsented ? "opacity-50 pointer-events-none" : ""}>
               <label htmlFor="fullName" className="block text-sm font-medium text-gray-700">
-                Full Legal Name
+                Type your full legal name exactly as it appears above
               </label>
               <input
                 id="fullName"
                 type="text"
                 value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
+                disabled={!allConsented}
+                onChange={(e) => {
+                  setFullName(e.target.value);
+                  if (e.target.value.trim() && !nameTypedAt) {
+                    setNameTypedAt(new Date().toISOString());
+                  }
+                }}
+                onBlur={() => {
+                  if (fullName.trim()) {
+                    setNameTypedAt(new Date().toISOString());
+                  }
+                }}
                 placeholder="Enter your full legal name"
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
               />
+
+              {/* Name verification */}
+              {fullName.trim() && allConsented && (
+                <div className="mt-2">
+                  {nameMatches ? (
+                    <p className="text-sm text-green-700 flex items-center gap-1">
+                      <CheckCircle className="h-3.5 w-3.5" />
+                      You are signing as <span className="font-medium">{fullName.trim()}</span> at email{" "}
+                      <span className="font-medium">{tenant.email}</span>. Is this correct?
+                    </p>
+                  ) : (
+                    <p className="text-sm text-amber-600 flex items-start gap-1">
+                      <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                      <span>
+                        The name you typed doesn&apos;t match the name on this lease. Please type your
+                        name exactly as: <span className="font-semibold">{expectedName}</span>
+                      </span>
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Signature Pad */}
-            <div>
+            <div className={!allConsented ? "opacity-50 pointer-events-none" : ""}>
               <label className="mb-2 block text-sm font-medium text-gray-700">
                 Your Signature
               </label>
@@ -764,17 +1119,8 @@ export default function SignLease() {
               disabled={!canSubmit}
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {signing ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Signing...
-                </>
-              ) : (
-                <>
-                  <CheckCircle className="h-4 w-4" />
-                  Sign Lease
-                </>
-              )}
+              <CheckCircle className="h-4 w-4" />
+              Sign Lease
             </button>
           </div>
 
@@ -788,6 +1134,18 @@ export default function SignLease() {
           <p>Powered by Brevva &mdash; Secure electronic lease signing</p>
         </div>
       </div>
+
+      {/* Confirmation Modal */}
+      <ConfirmSignModal
+        open={showConfirmModal}
+        onClose={() => setShowConfirmModal(false)}
+        onConfirm={confirmSign}
+        signing={signing}
+        propertyAddress={propertyAddress}
+        monthlyRent={Number(lease.monthlyRent)}
+        startDate={lease.startDate}
+        endDate={lease.endDate}
+      />
     </div>
   );
 }

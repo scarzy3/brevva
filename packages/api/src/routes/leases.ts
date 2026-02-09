@@ -18,7 +18,8 @@ import { validate } from "../middleware/validate.js";
 import { authenticate } from "../middleware/auth.js";
 import { tenancy } from "../middleware/tenancy.js";
 import { requireMinRole } from "../middleware/rbac.js";
-import { auditLog } from "../middleware/audit.js";
+import { auditLog, createAuditEntry } from "../middleware/audit.js";
+import { getClientIp, getClientCountry } from "../lib/client-ip.js";
 import {
   createLeaseSchema,
   updateLeaseSchema,
@@ -46,9 +47,11 @@ import type {
 } from "../schemas/leases.js";
 import {
   generateLeaseHTML,
+  generateCertificateHTML,
   saveLeaseDocument,
   DEFAULT_CLAUSES,
 } from "../services/leaseDocument.js";
+import type { CertificateSignerInfo } from "../services/leaseDocument.js";
 import {
   sendEmail,
   buildSignatureRequestEmail,
@@ -96,6 +99,7 @@ const leaseUpload = multer({
 /**
  * Regenerate the lease HTML document with current signature data
  * and update the stored file. Called after each signature event.
+ * When all parties have signed (tenants + landlord), appends a Certificate of Completion.
  */
 async function regenerateLeaseDocument(leaseId: string) {
   const lease = await prisma.lease.findUnique({
@@ -127,7 +131,7 @@ async function regenerateLeaseDocument(leaseId: string) {
   const clauses = (lease.terms as { clauses?: any[] } | null)?.clauses ?? [];
   const landlordSigData = lease.landlordSignatureData as Record<string, unknown> | null;
 
-  const html = generateLeaseHTML({
+  let html = generateLeaseHTML({
     leaseId: lease.id,
     organizationName: lease.organization.name,
     property: {
@@ -171,6 +175,48 @@ async function regenerateLeaseDocument(leaseId: string) {
         }
       : null,
   });
+
+  // If all tenants AND landlord have signed, append Certificate of Completion
+  const allTenantsSigned = lease.tenants.every((lt) => lt.signedAt);
+  if (allTenantsSigned && lease.landlordSignedAt && landlordSigData) {
+    const propertyAddress = `${lease.unit.property.address}, ${lease.unit.property.city}, ${lease.unit.property.state} ${lease.unit.property.zip}, Unit ${lease.unit.unitNumber}`;
+
+    const signers: CertificateSignerInfo[] = lease.tenants.map((lt) => {
+      const sd = lt.signatureData as Record<string, unknown> | null;
+      return {
+        role: lt.isPrimary ? "Tenant (Primary)" : "Tenant",
+        name: `${lt.tenant.firstName} ${lt.tenant.lastName}`,
+        email: lt.tenant.email,
+        signedAt: sd?.["timestamp"] as string ?? lt.signedAt!.toISOString(),
+        ipAddress: sd?.["ipAddress"] as string ?? sd?.["ip"] as string ?? "unknown",
+        location: sd?.["ipCountry"] as string ?? null,
+        viewTimeSeconds: sd?.["totalViewTimeSeconds"] as number ?? null,
+      };
+    });
+
+    // Add landlord
+    signers.push({
+      role: "Landlord",
+      name: landlordSigData["fullName"] as string,
+      email: landlordSigData["email"] as string ?? "",
+      signedAt: landlordSigData["timestamp"] as string ?? lease.landlordSignedAt.toISOString(),
+      ipAddress: landlordSigData["ipAddress"] as string ?? landlordSigData["ip"] as string ?? "unknown",
+      location: landlordSigData["ipCountry"] as string ?? null,
+      viewTimeSeconds: landlordSigData["totalViewTimeSeconds"] as number ?? null,
+    });
+
+    const certHtml = generateCertificateHTML({
+      leaseId: lease.id,
+      propertyAddress,
+      createdAt: lease.createdAt.toISOString(),
+      completedAt: new Date().toISOString(),
+      documentHash: lease.documentHash ?? "",
+      signers,
+    });
+
+    // Insert certificate before closing </body> tag
+    html = html.replace("</body>", `${certHtml}\n</body>`);
+  }
 
   const { url, hash } = saveLeaseDocument(html, lease.id);
   await prisma.lease.update({
@@ -243,6 +289,21 @@ router.get(
       throw new ValidationError("This lease is no longer available for signing");
     }
 
+    // Log SIGNING_LINK_OPENED audit entry
+    const clientIp = getClientIp(req);
+    createAuditEntry({
+      organizationId: leaseTenant.lease.organizationId,
+      userId: leaseTenant.tenantId,
+      action: "SIGNING_LINK_OPENED",
+      entityType: "Lease",
+      entityId: leaseTenant.lease.id,
+      changes: {
+        tenantName: `${leaseTenant.tenant.firstName} ${leaseTenant.tenant.lastName}`,
+        userAgent: req.headers["user-agent"] ?? "unknown",
+      },
+      ipAddress: clientIp,
+    });
+
     // Return lease data for the signing page
     const lease = leaseTenant.lease;
     res.json({
@@ -270,6 +331,14 @@ router.get(
         isPrimary: lt.isPrimary,
         signed: !!lt.signedAt,
       })),
+      // Token metadata for signature data
+      signingToken: {
+        token: token,
+        createdAt: leaseTenant.tokenExpiresAt
+          ? new Date(leaseTenant.tokenExpiresAt.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
+          : null,
+        expiresAt: leaseTenant.tokenExpiresAt?.toISOString() ?? null,
+      },
     });
   })
 );
@@ -279,7 +348,29 @@ router.post(
   validate({ params: signingTokenParamSchema, body: tokenSignLeaseSchema }),
   asyncHandler(async (req, res) => {
     const token = param(req, "token");
-    const body = req.body as { fullName: string; email: string; agreedToTerms: true; agreedToEsign: true; signatureImage?: string };
+    const body = req.body as {
+      fullName: string;
+      email: string;
+      agreedToTerms: true;
+      agreedToEsign: true;
+      agreedToIdentity: true;
+      signatureImage?: string;
+      signingMetadata?: {
+        screenResolution?: string;
+        timezone?: string;
+        browserLanguage?: string;
+        platform?: string;
+        pageOpenedAt?: string;
+        documentViewedAt?: string;
+        scrolledToBottomAt?: string;
+        consent1CheckedAt?: string;
+        consent2CheckedAt?: string;
+        consent3CheckedAt?: string;
+        nameTypedAt?: string;
+        signedAt?: string;
+        totalViewTimeSeconds?: number;
+      };
+    };
 
     const leaseTenant = await prisma.leaseTenant.findFirst({
       where: { signingToken: token },
@@ -326,8 +417,12 @@ router.post(
       throw new ValidationError("This lease is no longer available for signing");
     }
 
-    // Build signature data
+    // Build expanded signature data
     const now = new Date();
+    const clientIp = getClientIp(req);
+    const ipCountry = getClientCountry(req);
+    const metadata = body.signingMetadata ?? {};
+
     const signatureHash = createHash("sha256")
       .update(
         JSON.stringify({
@@ -341,13 +436,43 @@ router.post(
       )
       .digest("hex");
 
+    // Token metadata
+    const tokenCreatedAt = leaseTenant.tokenExpiresAt
+      ? new Date(leaseTenant.tokenExpiresAt.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
+      : null;
+    const tokenExpiresAt = leaseTenant.tokenExpiresAt?.toISOString() ?? null;
+
     const signatureData = {
+      // Identity
       fullName: body.fullName,
       email: body.email,
-      ip: req.ip ?? req.socket.remoteAddress ?? "unknown",
+      // Device & Network
+      ipAddress: clientIp,
+      ipCountry: ipCountry ?? undefined,
       userAgent: req.headers["user-agent"] ?? "unknown",
+      screenResolution: metadata.screenResolution ?? undefined,
+      timezone: metadata.timezone ?? undefined,
+      browserLanguage: metadata.browserLanguage ?? undefined,
+      platform: metadata.platform ?? undefined,
+      // Timing & Interaction Proof
+      pageOpenedAt: metadata.pageOpenedAt ?? undefined,
+      documentViewedAt: metadata.documentViewedAt ?? undefined,
+      scrolledToBottomAt: metadata.scrolledToBottomAt ?? undefined,
+      consent1CheckedAt: metadata.consent1CheckedAt ?? undefined,
+      consent2CheckedAt: metadata.consent2CheckedAt ?? undefined,
+      consent3CheckedAt: metadata.consent3CheckedAt ?? undefined,
+      nameTypedAt: metadata.nameTypedAt ?? undefined,
+      signedAt: now.toISOString(),
+      totalViewTimeSeconds: metadata.totalViewTimeSeconds ?? undefined,
+      // Document Integrity
       documentHash: lease.documentHash ?? "",
       hash: signatureHash,
+      // Authentication
+      signingToken: token,
+      tokenCreatedAt,
+      tokenExpiresAt,
+      // Legacy compat
+      ip: clientIp,
       timestamp: now.toISOString(),
       ...(body.signatureImage ? { signatureImage: body.signatureImage } : {}),
     };
@@ -361,6 +486,21 @@ router.post(
         signingToken: null,
         tokenExpiresAt: null,
       },
+    });
+
+    // Audit: SIGNATURE_SUBMITTED
+    createAuditEntry({
+      organizationId: lease.organizationId,
+      userId: leaseTenant.tenantId,
+      action: "SIGNATURE_SUBMITTED",
+      entityType: "Lease",
+      entityId: lease.id,
+      changes: {
+        fullName: body.fullName,
+        email: body.email,
+        userAgent: req.headers["user-agent"] ?? "unknown",
+      },
+      ipAddress: clientIp,
     });
 
     // Check if all tenants have now signed
@@ -393,6 +533,17 @@ router.post(
         });
       });
       leaseStatus = "ACTIVE";
+
+      // Audit: ALL_PARTIES_SIGNED (tenants done, landlord still pending)
+      createAuditEntry({
+        organizationId: lease.organizationId,
+        userId: leaseTenant.tenantId,
+        action: "ALL_PARTIES_SIGNED",
+        entityType: "Lease",
+        entityId: lease.id,
+        changes: { note: "All tenant signatures collected" },
+        ipAddress: clientIp,
+      });
     }
 
     // Send confirmation emails
@@ -416,20 +567,22 @@ router.post(
     // Regenerate lease document with the new signature
     await regenerateLeaseDocument(lease.id);
 
-    // Create audit log entry (no auth user for token-based, use tenant info)
-    prisma.auditLog
-      .create({
-        data: {
-          organizationId: lease.organizationId,
-          userId: leaseTenant.tenantId, // Best effort - use tenant ID
-          action: "SIGN",
-          entityType: "Lease",
-          entityId: lease.id,
-          changes: { fullName: body.fullName, email: body.email },
-          ipAddress: req.ip ?? req.socket.remoteAddress ?? null,
-        },
-      })
-      .catch(() => {});
+    // Audit: SIGNATURE_CONFIRMED
+    createAuditEntry({
+      organizationId: lease.organizationId,
+      userId: leaseTenant.tenantId,
+      action: "SIGNATURE_CONFIRMED",
+      entityType: "Lease",
+      entityId: lease.id,
+      changes: {
+        fullName: body.fullName,
+        email: body.email,
+        signatureId: signatureHash.substring(0, 16),
+        ipAddress: clientIp,
+        ipCountry: ipCountry,
+      },
+      ipAddress: clientIp,
+    });
 
     // Fetch updated document URL after regeneration
     const updatedLease = await prisma.lease.findUnique({
@@ -447,6 +600,15 @@ router.post(
       allSigned: unsignedCount === 0,
       remainingSignatures: unsignedCount,
       documentUrl: updatedLease?.documentUrl ?? lease.documentUrl,
+      signatureReceipt: {
+        documentId: lease.id,
+        signedBy: body.fullName,
+        email: body.email,
+        signedAt: now.toISOString(),
+        ipAddress: clientIp,
+        location: ipCountry,
+        signatureId: signatureHash.substring(0, 16),
+      },
     });
   })
 );
@@ -594,6 +756,9 @@ router.post(
     }
 
     const now = new Date();
+    const addendumClientIp = getClientIp(req);
+    const addendumIpCountry = getClientCountry(req);
+
     const signatureHash = createHash("sha256")
       .update(
         JSON.stringify({
@@ -610,7 +775,9 @@ router.post(
     const signatureData = {
       fullName: body.fullName,
       email: body.email,
-      ip: req.ip ?? req.socket.remoteAddress ?? "unknown",
+      ipAddress: addendumClientIp,
+      ipCountry: addendumIpCountry ?? undefined,
+      ip: addendumClientIp,
       userAgent: req.headers["user-agent"] ?? "unknown",
       documentHash: addendum.documentHash ?? "",
       hash: signatureHash,
@@ -1162,7 +1329,174 @@ router.get(
       ".html": "text/html",
     };
     res.setHeader("Content-Type", contentTypes[ext] ?? "application/octet-stream");
+
+    // Audit: SIGNED_DOCUMENT_DOWNLOADED
+    if (lease.documentUrl) {
+      createAuditEntry({
+        organizationId: orgId,
+        userId: req.user!.userId,
+        action: "SIGNED_DOCUMENT_DOWNLOADED",
+        entityType: "Lease",
+        entityId: param(req, "id"),
+        changes: {
+          userAgent: req.headers["user-agent"] ?? "unknown",
+        },
+        ipAddress: getClientIp(req),
+      });
+    }
+
     res.sendFile(filePath);
+  })
+);
+
+// ─── GET /leases/:id/verify-signatures ──────────────────────────────
+router.get(
+  "/:id/verify-signatures",
+  validate({ params: leaseIdParamSchema }),
+  asyncHandler(async (req, res) => {
+    const orgId = req.organizationId!;
+
+    const lease = await prisma.lease.findFirst({
+      where: { id: param(req, "id"), organizationId: orgId },
+      include: {
+        tenants: {
+          include: {
+            tenant: {
+              select: { id: true, firstName: true, lastName: true, email: true },
+            },
+          },
+        },
+        unit: {
+          select: {
+            property: {
+              select: { state: true },
+            },
+          },
+        },
+      },
+    });
+    if (!lease) {
+      throw new NotFoundError("Lease", param(req, "id"));
+    }
+
+    // Verify document hash
+    let hashVerified = false;
+    if (lease.documentUrl && lease.documentHash) {
+      try {
+        const filePath = path.join(
+          path.resolve(env.UPLOAD_DIR),
+          lease.documentUrl.replace(/^\/uploads\//, "")
+        );
+        if (fs.existsSync(filePath)) {
+          const content = fs.readFileSync(filePath, "utf-8");
+          const currentHash = createHash("sha256").update(content).digest("hex");
+          hashVerified = currentHash === lease.documentHash;
+        }
+      } catch {
+        // hash verification failed
+      }
+    }
+
+    // Determine status
+    const allTenantsSigned = lease.tenants.every((lt) => lt.signedAt);
+    const landlordSigned = !!lease.landlordSignedAt;
+    let status: "complete" | "pending" | "expired" = "pending";
+    if (allTenantsSigned && landlordSigned) {
+      status = "complete";
+    } else if (lease.status === "EXPIRED" || lease.status === "TERMINATED") {
+      status = "expired";
+    }
+
+    // Build signers array
+    const signers = lease.tenants.map((lt) => {
+      const sd = lt.signatureData as Record<string, unknown> | null;
+      return {
+        name: `${lt.tenant.firstName} ${lt.tenant.lastName}`,
+        email: lt.tenant.email,
+        role: lt.isPrimary ? "Tenant (Primary)" : "Tenant",
+        signed: !!lt.signedAt,
+        signedAt: sd?.["signedAt"] as string ?? sd?.["timestamp"] as string ?? lt.signedAt?.toISOString() ?? null,
+        ipAddress: sd?.["ipAddress"] as string ?? sd?.["ip"] as string ?? null,
+        location: sd?.["ipCountry"] as string ?? null,
+        viewTimeSeconds: sd?.["totalViewTimeSeconds"] as number ?? null,
+        signatureId: sd?.["hash"] as string ?? "",
+      };
+    });
+
+    // Add landlord
+    const landlordSigData = lease.landlordSignatureData as Record<string, unknown> | null;
+    if (landlordSigData) {
+      signers.push({
+        name: landlordSigData["fullName"] as string ?? "",
+        email: landlordSigData["email"] as string ?? "",
+        role: "Landlord",
+        signed: !!lease.landlordSignedAt,
+        signedAt: landlordSigData["signedAt"] as string ?? landlordSigData["timestamp"] as string ?? lease.landlordSignedAt?.toISOString() ?? null,
+        ipAddress: landlordSigData["ipAddress"] as string ?? landlordSigData["ip"] as string ?? null,
+        location: landlordSigData["ipCountry"] as string ?? null,
+        viewTimeSeconds: landlordSigData["totalViewTimeSeconds"] as number ?? null,
+        signatureId: "",
+      });
+    }
+
+    // Fetch audit trail
+    const auditLogs = await prisma.auditLog.findMany({
+      where: {
+        organizationId: orgId,
+        entityType: "Lease",
+        entityId: lease.id,
+      },
+      orderBy: { createdAt: "asc" },
+      select: {
+        action: true,
+        createdAt: true,
+        ipAddress: true,
+        changes: true,
+      },
+    });
+
+    const auditTrail = auditLogs.map((log) => ({
+      action: log.action,
+      timestamp: log.createdAt.toISOString(),
+      ip: log.ipAddress ?? "",
+      details: log.changes,
+    }));
+
+    // Detect anomalies
+    const anomalies: string[] = [];
+    for (const signer of signers) {
+      if (signer.signed && signer.viewTimeSeconds != null && signer.viewTimeSeconds < 30) {
+        anomalies.push(
+          `${signer.name} viewed the document for less than 30 seconds (${signer.viewTimeSeconds}s)`
+        );
+      }
+    }
+
+    // Check for multiple signing attempts
+    const signAttempts = auditLogs.filter(
+      (l) => l.action === "SIGNATURE_SUBMITTED" || l.action === "SIGN"
+    );
+    const attemptsByUser = new Map<string, number>();
+    for (const attempt of signAttempts) {
+      const changes = attempt.changes as Record<string, unknown> | null;
+      const email = changes?.["email"] as string ?? "unknown";
+      attemptsByUser.set(email, (attemptsByUser.get(email) ?? 0) + 1);
+    }
+    for (const [email, count] of attemptsByUser) {
+      if (count > 1) {
+        anomalies.push(`Multiple signing attempts detected for ${email} (${count} attempts)`);
+      }
+    }
+
+    res.json({
+      documentId: lease.id,
+      documentHash: lease.documentHash ?? "",
+      hashVerified,
+      status,
+      signers,
+      auditTrail,
+      anomalies,
+    });
   })
 );
 
@@ -1452,7 +1786,11 @@ router.post(
       throw new ValidationError("You have already signed this lease");
     }
 
-    // Build signature data
+    // Build signature data with real IP
+    const authClientIp = getClientIp(req);
+    const authIpCountry = getClientCountry(req);
+    const authNow = new Date();
+
     const signatureHash = createHash("sha256")
       .update(
         JSON.stringify({
@@ -1461,7 +1799,7 @@ router.post(
           fullName: body.fullName,
           email: body.email,
           documentHash: lease.documentHash ?? "",
-          timestamp: new Date().toISOString(),
+          timestamp: authNow.toISOString(),
         })
       )
       .digest("hex");
@@ -1469,11 +1807,14 @@ router.post(
     const signatureData = {
       fullName: body.fullName,
       email: body.email,
-      ip: req.ip ?? req.socket.remoteAddress ?? "unknown",
+      ipAddress: authClientIp,
+      ipCountry: authIpCountry ?? undefined,
+      ip: authClientIp,
       userAgent: req.headers["user-agent"] ?? "unknown",
       documentHash: lease.documentHash ?? "",
       hash: signatureHash,
-      timestamp: new Date().toISOString(),
+      timestamp: authNow.toISOString(),
+      signedAt: authNow.toISOString(),
       ...(body.signatureImage ? { signatureImage: body.signatureImage } : {}),
     };
 
@@ -1481,7 +1822,7 @@ router.post(
     await prisma.leaseTenant.update({
       where: { id: leaseTenant.id },
       data: {
-        signedAt: new Date(),
+        signedAt: authNow,
         signatureData,
         signingToken: null,
         tokenExpiresAt: null,
@@ -1544,7 +1885,26 @@ router.post(
   auditLog("COUNTERSIGN", "Lease"),
   asyncHandler(async (req, res) => {
     const orgId = req.organizationId!;
-    const body = req.body as { fullName: string; signatureImage?: string };
+    const body = req.body as {
+      fullName: string;
+      signatureImage?: string;
+      agreedToTerms?: true;
+      agreedToEsign?: true;
+      agreedToIdentity?: true;
+      signingMetadata?: {
+        screenResolution?: string;
+        timezone?: string;
+        browserLanguage?: string;
+        platform?: string;
+        pageOpenedAt?: string;
+        consent1CheckedAt?: string;
+        consent2CheckedAt?: string;
+        consent3CheckedAt?: string;
+        nameTypedAt?: string;
+        signedAt?: string;
+        totalViewTimeSeconds?: number;
+      };
+    };
 
     const lease = await prisma.lease.findFirst({
       where: { id: param(req, "id"), organizationId: orgId },
@@ -1574,10 +1934,28 @@ router.post(
     }
 
     const now = new Date();
+    const csClientIp = getClientIp(req);
+    const csIpCountry = getClientCountry(req);
+    const csMetadata = body.signingMetadata ?? {};
+
     const landlordSignatureData = {
       fullName: body.fullName,
-      ip: req.ip ?? req.socket.remoteAddress ?? "unknown",
+      email: req.user?.email ?? "",
+      ipAddress: csClientIp,
+      ipCountry: csIpCountry ?? undefined,
+      ip: csClientIp,
       userAgent: req.headers["user-agent"] ?? "unknown",
+      screenResolution: csMetadata.screenResolution ?? undefined,
+      timezone: csMetadata.timezone ?? undefined,
+      browserLanguage: csMetadata.browserLanguage ?? undefined,
+      platform: csMetadata.platform ?? undefined,
+      pageOpenedAt: csMetadata.pageOpenedAt ?? undefined,
+      consent1CheckedAt: csMetadata.consent1CheckedAt ?? undefined,
+      consent2CheckedAt: csMetadata.consent2CheckedAt ?? undefined,
+      consent3CheckedAt: csMetadata.consent3CheckedAt ?? undefined,
+      nameTypedAt: csMetadata.nameTypedAt ?? undefined,
+      signedAt: now.toISOString(),
+      totalViewTimeSeconds: csMetadata.totalViewTimeSeconds ?? undefined,
       documentHash: lease.documentHash ?? "",
       timestamp: now.toISOString(),
       ...(body.signatureImage ? { signatureImage: body.signatureImage } : {}),
@@ -1591,7 +1969,21 @@ router.post(
       },
     });
 
-    // Regenerate lease document with landlord signature
+    // Audit: ALL_PARTIES_SIGNED (landlord was the final signer)
+    createAuditEntry({
+      organizationId: lease.organizationId,
+      userId: req.user!.userId,
+      action: "ALL_PARTIES_SIGNED",
+      entityType: "Lease",
+      entityId: lease.id,
+      changes: {
+        note: "Landlord countersigned - all parties have signed",
+        landlordName: body.fullName,
+      },
+      ipAddress: csClientIp,
+    });
+
+    // Regenerate lease document with landlord signature (will include certificate)
     await regenerateLeaseDocument(lease.id);
 
     res.json({

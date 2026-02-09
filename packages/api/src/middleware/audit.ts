@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma.js";
+import { getClientIp } from "../lib/client-ip.js";
 
 export function auditLog(
   action: string,
@@ -25,11 +26,14 @@ export function auditLog(
               action,
               entityType,
               entityId: String(entityId),
-              changes: req.body as object,
-              ipAddress: req.ip ?? req.socket.remoteAddress ?? null,
+              changes: {
+                ...(req.body as object),
+                userAgent: req.headers["user-agent"] ?? "unknown",
+              },
+              ipAddress: getClientIp(req),
             },
           })
-          .catch((err) => {
+          .catch((err: unknown) => {
             console.error("Failed to write audit log:", err);
           });
       }
@@ -37,4 +41,23 @@ export function auditLog(
     } as typeof res.json;
     next();
   };
+}
+
+/**
+ * Create an audit log entry directly (for unauthenticated flows like token-based signing).
+ */
+export async function createAuditEntry(data: {
+  organizationId: string;
+  userId: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  changes?: Record<string, unknown>;
+  ipAddress?: string | null;
+}) {
+  return prisma.auditLog
+    .create({ data })
+    .catch((err: unknown) => {
+      console.error("Failed to write audit log:", err);
+    });
 }
