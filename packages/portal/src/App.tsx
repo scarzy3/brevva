@@ -11,6 +11,7 @@ import Maintenance from "@/pages/Maintenance";
 import Messages from "@/pages/Messages";
 import Profile from "@/pages/Profile";
 import SignLease from "@/pages/SignLease";
+import SignAddendum from "@/pages/SignAddendum";
 import NotFound from "@/pages/NotFound";
 
 export default function App() {
@@ -20,6 +21,7 @@ export default function App() {
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/sign/:token" element={<SignLease />} />
+      <Route path="/sign/addendum/:token" element={<SignAddendum />} />
       <Route
         element={
           <PrivateRoute>

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { Plus } from "lucide-react";
+import { Plus, Upload } from "lucide-react";
 
 function currency(n: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
@@ -33,12 +33,20 @@ export default function Leases() {
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Leases</h1>
-        <button
-          onClick={() => navigate("/leases/new")}
-          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-        >
-          <Plus className="h-4 w-4" /> New Lease
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate("/leases/upload")}
+            className="flex items-center gap-2 rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            <Upload className="h-4 w-4" /> Upload Lease
+          </button>
+          <button
+            onClick={() => navigate("/leases/new")}
+            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            <Plus className="h-4 w-4" /> New Lease
+          </button>
+        </div>
       </div>
 
       <div className="mb-4">

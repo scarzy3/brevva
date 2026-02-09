@@ -370,6 +370,7 @@ model Tenant {
   vehicles            TenantVehicle[]
   pets                TenantPet[]
   leaseTenants        LeaseTenant[]
+  addendumSignatures  LeaseAddendumSignature[]
   transactions        Transaction[]
   payments            Payment[]
   paymentMethods      PaymentMethodRecord[]
@@ -492,19 +493,41 @@ model LeaseTenant {
 }
 
 model LeaseAddendum {
-  id          String              @id @default(uuid()) @db.Uuid
-  leaseId     String              @db.Uuid
-  title       String
-  content     String
-  documentUrl String?
-  status      LeaseAddendumStatus @default(DRAFT)
-  createdAt   DateTime            @default(now())
+  id            String              @id @default(uuid()) @db.Uuid
+  leaseId       String              @db.Uuid
+  title         String
+  content       String
+  documentUrl   String?
+  documentHash  String?
+  effectiveDate DateTime?
+  status        LeaseAddendumStatus @default(DRAFT)
+  createdAt     DateTime            @default(now())
 
   // Relations
-  lease Lease @relation(fields: [leaseId], references: [id], onDelete: Cascade)
+  lease      Lease                    @relation(fields: [leaseId], references: [id], onDelete: Cascade)
+  signatures LeaseAddendumSignature[]
 
   @@index([leaseId])
   @@map("lease_addendums")
+}
+
+model LeaseAddendumSignature {
+  id             String    @id @default(uuid()) @db.Uuid
+  addendumId     String    @db.Uuid
+  tenantId       String    @db.Uuid
+  signedAt       DateTime?
+  signatureData  Json?
+  signingToken   String?   @unique
+  tokenExpiresAt DateTime?
+
+  // Relations
+  addendum LeaseAddendum @relation(fields: [addendumId], references: [id], onDelete: Cascade)
+  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([addendumId, tenantId])
+  @@index([addendumId])
+  @@index([tenantId])
+  @@map("lease_addendum_signatures")
 }
 
 // ─── Financials ─────────────────────────────────────────────────────

@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { createHash, randomUUID, randomBytes } from "crypto";
 import bcrypt from "bcryptjs";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../lib/async-handler.js";
@@ -27,6 +30,10 @@ import {
   countersignLeaseSchema,
   tokenSignLeaseSchema,
   signingTokenParamSchema,
+  uploadLeaseSchema,
+  uploadAddendumSchema,
+  addendumSigningTokenParamSchema,
+  addendumSendParamSchema,
 } from "../schemas/leases.js";
 import type {
   CreateLeaseInput,
@@ -34,6 +41,8 @@ import type {
   LeaseListQuery,
   SignLeaseInput,
   CreateAddendumInput,
+  UploadLeaseInput,
+  UploadAddendumInput,
 } from "../schemas/leases.js";
 import {
   generateLeaseHTML,
@@ -49,6 +58,40 @@ import {
 import { env } from "../config/env.js";
 
 const router = Router();
+
+// ─── File upload config for lease documents ─────────────────────────
+const leaseUploadStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, env.UPLOAD_DIR);
+  },
+  filename: (_req, file, cb) => {
+    // Sanitize filename: remove path traversal characters
+    const sanitized = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const ext = path.extname(sanitized);
+    cb(null, `lease-upload-${randomUUID()}${ext}`);
+  },
+});
+
+const leaseUpload = multer({
+  storage: leaseUploadStorage,
+  limits: { fileSize: env.MAX_FILE_SIZE },
+  fileFilter: (_req, file, cb) => {
+    const allowed = [
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ];
+    if (!allowed.includes(file.mimetype)) {
+      cb(new ValidationError("Only PDF and DOCX files are allowed") as any);
+      return;
+    }
+    // Check for path traversal in filename
+    if (file.originalname.includes("..") || file.originalname.includes("/") || file.originalname.includes("\\")) {
+      cb(new ValidationError("Invalid filename") as any);
+      return;
+    }
+    cb(null, true);
+  },
+});
 
 /**
  * Regenerate the lease HTML document with current signature data
@@ -408,6 +451,210 @@ router.post(
   })
 );
 
+// ─── Public route: addendum token-based signing ──────────────────────
+router.get(
+  "/addendum/sign/:token",
+  validate({ params: addendumSigningTokenParamSchema }),
+  asyncHandler(async (req, res) => {
+    const token = param(req, "token");
+
+    const signature = await prisma.leaseAddendumSignature.findFirst({
+      where: { signingToken: token },
+      include: {
+        tenant: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+        addendum: {
+          include: {
+            lease: {
+              include: {
+                organization: { select: { id: true, name: true } },
+                unit: {
+                  select: {
+                    id: true,
+                    unitNumber: true,
+                    property: {
+                      select: {
+                        id: true,
+                        name: true,
+                        address: true,
+                        city: true,
+                        state: true,
+                        zip: true,
+                      },
+                    },
+                  },
+                },
+                tenants: {
+                  include: {
+                    tenant: {
+                      select: { id: true, firstName: true, lastName: true },
+                    },
+                  },
+                },
+              },
+            },
+            signatures: {
+              select: {
+                tenantId: true,
+                signedAt: true,
+                tenant: {
+                  select: { firstName: true, lastName: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!signature) {
+      throw new NotFoundError("Signing token");
+    }
+
+    if (signature.tokenExpiresAt && signature.tokenExpiresAt < new Date()) {
+      throw new ValidationError("This signing link has expired");
+    }
+
+    if (signature.signedAt) {
+      throw new ValidationError("You have already signed this addendum");
+    }
+
+    if (signature.addendum.status !== "PENDING_SIGNATURE") {
+      throw new ValidationError("This addendum is no longer available for signing");
+    }
+
+    const addendum = signature.addendum;
+    const lease = addendum.lease;
+
+    res.json({
+      tenant: signature.tenant,
+      addendum: {
+        id: addendum.id,
+        title: addendum.title,
+        content: addendum.content,
+        documentUrl: addendum.documentUrl,
+        documentHash: addendum.documentHash,
+        effectiveDate: addendum.effectiveDate,
+        status: addendum.status,
+      },
+      lease: {
+        id: lease.id,
+        startDate: lease.startDate,
+        endDate: lease.endDate,
+        monthlyRent: lease.monthlyRent,
+      },
+      unit: lease.unit,
+      organization: lease.organization,
+      signatures: addendum.signatures.map((s) => ({
+        firstName: s.tenant.firstName,
+        lastName: s.tenant.lastName,
+        signed: !!s.signedAt,
+      })),
+    });
+  })
+);
+
+router.post(
+  "/addendum/sign/:token",
+  validate({ params: addendumSigningTokenParamSchema, body: tokenSignLeaseSchema }),
+  asyncHandler(async (req, res) => {
+    const token = param(req, "token");
+    const body = req.body as { fullName: string; email: string; agreedToTerms: true; agreedToEsign: true; signatureImage?: string };
+
+    const signature = await prisma.leaseAddendumSignature.findFirst({
+      where: { signingToken: token },
+      include: {
+        tenant: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+        addendum: {
+          include: {
+            signatures: true,
+          },
+        },
+      },
+    });
+
+    if (!signature) {
+      throw new NotFoundError("Signing token");
+    }
+
+    if (signature.tokenExpiresAt && signature.tokenExpiresAt < new Date()) {
+      throw new ValidationError("This signing link has expired");
+    }
+
+    if (signature.signedAt) {
+      throw new ValidationError("You have already signed this addendum");
+    }
+
+    const addendum = signature.addendum;
+    if (addendum.status !== "PENDING_SIGNATURE") {
+      throw new ValidationError("This addendum is no longer available for signing");
+    }
+
+    const now = new Date();
+    const signatureHash = createHash("sha256")
+      .update(
+        JSON.stringify({
+          addendumId: addendum.id,
+          tenantId: signature.tenantId,
+          fullName: body.fullName,
+          email: body.email,
+          documentHash: addendum.documentHash ?? "",
+          timestamp: now.toISOString(),
+        })
+      )
+      .digest("hex");
+
+    const signatureData = {
+      fullName: body.fullName,
+      email: body.email,
+      ip: req.ip ?? req.socket.remoteAddress ?? "unknown",
+      userAgent: req.headers["user-agent"] ?? "unknown",
+      documentHash: addendum.documentHash ?? "",
+      hash: signatureHash,
+      timestamp: now.toISOString(),
+      ...(body.signatureImage ? { signatureImage: body.signatureImage } : {}),
+    };
+
+    await prisma.leaseAddendumSignature.update({
+      where: { id: signature.id },
+      data: {
+        signedAt: now,
+        signatureData,
+        signingToken: null,
+        tokenExpiresAt: null,
+      },
+    });
+
+    // Check if all signatures are done
+    const unsignedCount = addendum.signatures.filter(
+      (s) => s.id !== signature.id && !s.signedAt
+    ).length;
+
+    let addendumStatus: string = addendum.status;
+    if (unsignedCount === 0) {
+      await prisma.leaseAddendum.update({
+        where: { id: addendum.id },
+        data: { status: "ACTIVE" },
+      });
+      addendumStatus = "ACTIVE";
+    }
+
+    res.json({
+      message:
+        addendumStatus === "ACTIVE"
+          ? "Addendum fully signed and activated"
+          : "Signature recorded successfully",
+      addendumStatus,
+      signedAt: signatureData.timestamp,
+      allSigned: unsignedCount === 0,
+      remainingSignatures: unsignedCount,
+    });
+  })
+);
+
 // All remaining lease routes require auth + tenancy
 router.use(authenticate, tenancy);
 
@@ -600,6 +847,134 @@ router.post(
   })
 );
 
+// ─── POST /leases/upload ──────────────────────────────────────────────
+router.post(
+  "/upload",
+  requireMinRole("TEAM_MEMBER"),
+  leaseUpload.single("file"),
+  auditLog("CREATE", "Lease"),
+  asyncHandler(async (req, res) => {
+    const orgId = req.organizationId!;
+
+    if (!req.file) {
+      throw new ValidationError("A document file is required");
+    }
+
+    // Parse and validate body fields
+    const body = uploadLeaseSchema.parse(req.body);
+    const tenantIds: string[] = Array.isArray(body.tenantIds) ? body.tenantIds : [];
+
+    if (tenantIds.length === 0) {
+      throw new ValidationError("At least one tenant is required");
+    }
+
+    if (!tenantIds.includes(body.primaryTenantId)) {
+      throw new ValidationError("primaryTenantId must be included in tenantIds");
+    }
+
+    // Validate unit belongs to org
+    const unit = await prisma.unit.findFirst({
+      where: { id: body.unitId, organizationId: orgId },
+    });
+    if (!unit) {
+      throw new NotFoundError("Unit", body.unitId);
+    }
+
+    // Check no active lease on this unit
+    const activeLease = await prisma.lease.findFirst({
+      where: {
+        unitId: body.unitId,
+        status: { in: ["ACTIVE", "PENDING_SIGNATURE"] },
+      },
+    });
+    if (activeLease) {
+      throw new ValidationError("This unit already has an active or pending lease");
+    }
+
+    // Validate tenants
+    const tenants = await prisma.tenant.findMany({
+      where: { id: { in: tenantIds }, organizationId: orgId },
+    });
+    if (tenants.length !== tenantIds.length) {
+      throw new ValidationError(
+        "One or more tenant IDs are invalid or do not belong to this organization"
+      );
+    }
+
+    // Validate dates
+    if (body.endDate <= body.startDate) {
+      throw new ValidationError("End date must be after start date");
+    }
+
+    // Move uploaded file to lease-specific directory
+    const leaseId = randomUUID();
+    const leaseDir = path.join(path.resolve(env.UPLOAD_DIR), "leases", leaseId);
+    fs.mkdirSync(leaseDir, { recursive: true });
+
+    const sanitizedOriginal = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const destPath = path.join(leaseDir, sanitizedOriginal);
+    fs.renameSync(req.file.path, destPath);
+
+    // Generate document hash
+    const fileBuffer = fs.readFileSync(destPath);
+    const documentHash = createHash("sha256").update(fileBuffer).digest("hex");
+
+    const documentUrl = `/uploads/leases/${leaseId}/${sanitizedOriginal}`;
+
+    const lease = await prisma.$transaction(async (tx) => {
+      const created = await tx.lease.create({
+        data: {
+          id: leaseId,
+          organizationId: orgId,
+          unitId: body.unitId,
+          startDate: body.startDate,
+          endDate: body.endDate,
+          monthlyRent: body.monthlyRent,
+          securityDeposit: body.securityDeposit,
+          lateFeeAmount: body.lateFeeAmount,
+          lateFeeType: body.lateFeeType,
+          gracePeriodDays: body.gracePeriodDays,
+          rentDueDay: body.rentDueDay ?? 1,
+          documentUrl,
+          documentHash,
+          terms: { source: "uploaded", originalFilename: req.file!.originalname } as unknown as Prisma.InputJsonValue,
+          status: "DRAFT",
+        },
+      });
+
+      await tx.leaseTenant.createMany({
+        data: tenantIds.map((tenantId) => ({
+          leaseId: created.id,
+          tenantId,
+          isPrimary: tenantId === body.primaryTenantId,
+        })),
+      });
+
+      return tx.lease.findUnique({
+        where: { id: created.id },
+        include: {
+          unit: {
+            select: {
+              id: true,
+              unitNumber: true,
+              property: { select: { id: true, name: true } },
+            },
+          },
+          tenants: {
+            include: {
+              tenant: {
+                select: { id: true, firstName: true, lastName: true, email: true },
+              },
+            },
+          },
+        },
+      });
+    });
+
+    res.status(201).json(lease);
+  })
+);
+
 // ─── GET /leases/:id ───────────────────────────────────────────────
 router.get(
   "/:id",
@@ -757,6 +1132,40 @@ router.patch(
   })
 );
 
+// ─── GET /leases/:id/document ─────────────────────────────────────────
+router.get(
+  "/:id/document",
+  validate({ params: leaseIdParamSchema }),
+  asyncHandler(async (req, res) => {
+    const orgId = req.organizationId!;
+
+    const lease = await prisma.lease.findFirst({
+      where: { id: param(req, "id"), organizationId: orgId },
+      select: { documentUrl: true },
+    });
+    if (!lease) {
+      throw new NotFoundError("Lease", param(req, "id"));
+    }
+    if (!lease.documentUrl) {
+      throw new NotFoundError("Document");
+    }
+
+    const filePath = path.join(path.resolve(env.UPLOAD_DIR), lease.documentUrl.replace(/^\/uploads\//, ""));
+    if (!fs.existsSync(filePath)) {
+      throw new NotFoundError("Document file");
+    }
+
+    const ext = path.extname(filePath).toLowerCase();
+    const contentTypes: Record<string, string> = {
+      ".pdf": "application/pdf",
+      ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ".html": "text/html",
+    };
+    res.setHeader("Content-Type", contentTypes[ext] ?? "application/octet-stream");
+    res.sendFile(filePath);
+  })
+);
+
 // ─── POST /leases/:id/send-for-signature ───────────────────────────
 router.post(
   "/:id/send-for-signature",
@@ -868,44 +1277,56 @@ router.post(
       sendEmail({ to: lt.tenant.email, ...welcomeEmail }).catch(() => {});
     }
 
-    // Generate lease document
-    const clauses = (lease.terms as { clauses?: any[] } | null)?.clauses ?? [];
-    const html = generateLeaseHTML({
-      leaseId: lease.id,
-      organizationName: lease.organization.name,
-      property: {
-        name: lease.unit.property.name,
-        address: lease.unit.property.address,
-        city: lease.unit.property.city,
-        state: lease.unit.property.state,
-        zip: lease.unit.property.zip,
-      },
-      unit: {
-        unitNumber: lease.unit.unitNumber,
-        bedrooms: lease.unit.bedrooms,
-        bathrooms: Number(lease.unit.bathrooms),
-        sqFt: lease.unit.sqFt,
-      },
-      tenants: lease.tenants.map((lt) => ({
-        id: lt.tenant.id,
-        firstName: lt.tenant.firstName,
-        lastName: lt.tenant.lastName,
-        email: lt.tenant.email,
-        phone: lt.tenant.phone,
-        isPrimary: lt.isPrimary,
-      })),
-      startDate: lease.startDate.toISOString(),
-      endDate: lease.endDate.toISOString(),
-      monthlyRent: Number(lease.monthlyRent),
-      securityDeposit: Number(lease.securityDeposit),
-      lateFeeAmount: lease.lateFeeAmount ? Number(lease.lateFeeAmount) : null,
-      lateFeeType: lease.lateFeeType,
-      gracePeriodDays: lease.gracePeriodDays,
-      rentDueDay: lease.rentDueDay,
-      clauses,
-    });
+    // Generate or reuse lease document
+    const termsData = lease.terms as Record<string, unknown> | null;
+    let documentUrl: string;
+    let documentHash: string;
 
-    const { url: documentUrl, hash: documentHash } = saveLeaseDocument(html, lease.id);
+    if (termsData?.["source"] === "uploaded" && lease.documentUrl && lease.documentHash) {
+      // Uploaded document — use existing file
+      documentUrl = lease.documentUrl;
+      documentHash = lease.documentHash;
+    } else {
+      // Builder-created lease — generate HTML document
+      const clauses = (termsData as { clauses?: any[] } | null)?.clauses ?? [];
+      const html = generateLeaseHTML({
+        leaseId: lease.id,
+        organizationName: lease.organization.name,
+        property: {
+          name: lease.unit.property.name,
+          address: lease.unit.property.address,
+          city: lease.unit.property.city,
+          state: lease.unit.property.state,
+          zip: lease.unit.property.zip,
+        },
+        unit: {
+          unitNumber: lease.unit.unitNumber,
+          bedrooms: lease.unit.bedrooms,
+          bathrooms: Number(lease.unit.bathrooms),
+          sqFt: lease.unit.sqFt,
+        },
+        tenants: lease.tenants.map((lt) => ({
+          id: lt.tenant.id,
+          firstName: lt.tenant.firstName,
+          lastName: lt.tenant.lastName,
+          email: lt.tenant.email,
+          phone: lt.tenant.phone,
+          isPrimary: lt.isPrimary,
+        })),
+        startDate: lease.startDate.toISOString(),
+        endDate: lease.endDate.toISOString(),
+        monthlyRent: Number(lease.monthlyRent),
+        securityDeposit: Number(lease.securityDeposit),
+        lateFeeAmount: lease.lateFeeAmount ? Number(lease.lateFeeAmount) : null,
+        lateFeeType: lease.lateFeeType,
+        gracePeriodDays: lease.gracePeriodDays,
+        rentDueDay: lease.rentDueDay,
+        clauses,
+      });
+      const saved = saveLeaseDocument(html, lease.id);
+      documentUrl = saved.url;
+      documentHash = saved.hash;
+    }
 
     // Generate signing tokens for each tenant
     const tokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
@@ -1418,6 +1839,181 @@ router.delete(
     });
 
     res.json({ message: "Addendum deleted successfully" });
+  })
+);
+
+// ─── POST /leases/:id/addendums/upload ────────────────────────────────
+router.post(
+  "/:id/addendums/upload",
+  requireMinRole("TEAM_MEMBER"),
+  leaseUpload.single("file"),
+  auditLog("CREATE", "LeaseAddendum"),
+  asyncHandler(async (req, res) => {
+    const orgId = req.organizationId!;
+
+    if (!req.file) {
+      throw new ValidationError("A document file is required");
+    }
+
+    const body = uploadAddendumSchema.parse(req.body);
+
+    const lease = await prisma.lease.findFirst({
+      where: { id: param(req, "id"), organizationId: orgId },
+    });
+    if (!lease) {
+      throw new NotFoundError("Lease", param(req, "id"));
+    }
+
+    if (lease.status === "TERMINATED" || lease.status === "EXPIRED") {
+      throw new ValidationError("Cannot add addendums to a terminated or expired lease");
+    }
+
+    const addendumId = randomUUID();
+    const addendumDir = path.join(
+      path.resolve(env.UPLOAD_DIR),
+      "leases",
+      param(req, "id"),
+      "addendums",
+      addendumId
+    );
+    fs.mkdirSync(addendumDir, { recursive: true });
+
+    const sanitizedOriginal = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const destPath = path.join(addendumDir, sanitizedOriginal);
+    fs.renameSync(req.file.path, destPath);
+
+    const fileBuffer = fs.readFileSync(destPath);
+    const documentHash = createHash("sha256").update(fileBuffer).digest("hex");
+
+    const documentUrl = `/uploads/leases/${param(req, "id")}/addendums/${addendumId}/${sanitizedOriginal}`;
+
+    const addendum = await prisma.leaseAddendum.create({
+      data: {
+        id: addendumId,
+        leaseId: param(req, "id")!,
+        title: body.title,
+        content: body.description ?? "",
+        documentUrl,
+        documentHash,
+        effectiveDate: body.effectiveDate,
+        status: "DRAFT",
+      },
+    });
+
+    res.status(201).json(addendum);
+  })
+);
+
+// ─── POST /leases/:id/addendums/:addendumId/send ─────────────────────
+router.post(
+  "/:id/addendums/:addendumId/send",
+  requireMinRole("TEAM_MEMBER"),
+  validate({ params: addendumSendParamSchema }),
+  auditLog("SEND_FOR_SIGNATURE", "LeaseAddendum"),
+  asyncHandler(async (req, res) => {
+    const orgId = req.organizationId!;
+
+    const lease = await prisma.lease.findFirst({
+      where: { id: param(req, "id"), organizationId: orgId },
+      include: {
+        organization: { select: { name: true } },
+        unit: {
+          select: {
+            unitNumber: true,
+            property: {
+              select: { address: true, city: true, state: true, zip: true },
+            },
+          },
+        },
+        tenants: {
+          include: {
+            tenant: {
+              select: { id: true, firstName: true, lastName: true, email: true },
+            },
+          },
+        },
+      },
+    });
+    if (!lease) {
+      throw new NotFoundError("Lease", param(req, "id"));
+    }
+
+    const addendum = await prisma.leaseAddendum.findFirst({
+      where: { id: param(req, "addendumId"), leaseId: param(req, "id") },
+    });
+    if (!addendum) {
+      throw new NotFoundError("Addendum", param(req, "addendumId"));
+    }
+
+    if (addendum.status !== "DRAFT") {
+      throw new ValidationError(
+        `Addendum must be in DRAFT status to send for signature (currently ${addendum.status})`
+      );
+    }
+
+    // Create signatures for all tenants on the lease
+    const tokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const signingTokens: { tenantId: string; token: string; email: string; name: string }[] = [];
+
+    for (const lt of lease.tenants) {
+      const token = randomUUID();
+
+      // Upsert to handle re-sends
+      await prisma.leaseAddendumSignature.upsert({
+        where: {
+          addendumId_tenantId: {
+            addendumId: addendum.id,
+            tenantId: lt.tenant.id,
+          },
+        },
+        create: {
+          addendumId: addendum.id,
+          tenantId: lt.tenant.id,
+          signingToken: token,
+          tokenExpiresAt: tokenExpiry,
+        },
+        update: {
+          signingToken: token,
+          tokenExpiresAt: tokenExpiry,
+        },
+      });
+
+      signingTokens.push({
+        tenantId: lt.tenant.id,
+        token,
+        email: lt.tenant.email,
+        name: `${lt.tenant.firstName} ${lt.tenant.lastName}`,
+      });
+    }
+
+    // Update addendum status
+    await prisma.leaseAddendum.update({
+      where: { id: addendum.id },
+      data: { status: "PENDING_SIGNATURE" },
+    });
+
+    // Send emails
+    const propertyAddress = `${lease.unit.property.address}, ${lease.unit.property.city}, ${lease.unit.property.state}`;
+    for (const st of signingTokens) {
+      const signingUrl = `${env.PORTAL_URL}/sign/addendum/${st.token}`;
+      const emailContent = buildSignatureRequestEmail({
+        tenantName: st.name,
+        propertyAddress,
+        unitNumber: lease.unit.unitNumber,
+        signingUrl,
+        landlordName: lease.organization.name,
+      });
+      sendEmail({ to: st.email, ...emailContent }).catch(() => {});
+    }
+
+    res.json({
+      message: "Addendum sent for signature",
+      pendingSignatures: signingTokens.map((st) => ({
+        tenantId: st.tenantId,
+        name: st.name,
+        email: st.email,
+      })),
+    });
   })
 );
 
