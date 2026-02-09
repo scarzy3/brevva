@@ -28,7 +28,11 @@ import {
   Eraser,
   Type,
   Loader2,
+  Upload,
+  ChevronDown,
+  Save,
 } from "lucide-react";
+import DocumentViewer from "@/components/DocumentViewer";
 
 function currency(n: number) {
   return new Intl.NumberFormat("en-US", {
@@ -318,6 +322,14 @@ export default function LeaseDetail() {
   const [showCountersignModal, setShowCountersignModal] = useState(false);
   const [csFullName, setCsFullName] = useState("");
   const [csSignatureImage, setCsSignatureImage] = useState<string | null>(null);
+  const [showAddendumDropdown, setShowAddendumDropdown] = useState(false);
+  const [showUploadAddendumModal, setShowUploadAddendumModal] = useState(false);
+  const [addendumFile, setAddendumFile] = useState<File | null>(null);
+  const [addendumTitle, setAddendumTitle] = useState("");
+  const [addendumEffectiveDate, setAddendumEffectiveDate] = useState("");
+  const [addendumDescription, setAddendumDescription] = useState("");
+  const [addendumFileError, setAddendumFileError] = useState<string | null>(null);
+  const [addendumSubmitting, setAddendumSubmitting] = useState(false);
 
   const {
     data: lease,
@@ -395,6 +407,68 @@ export default function LeaseDetail() {
     onError: (err: any) =>
       setActionError(err?.data?.error ?? err?.message ?? "Failed to delete"),
   });
+
+  const sendAddendumForSignature = useMutation({
+    mutationFn: (addendumId: string) =>
+      api(`/leases/${id}/addendums/${addendumId}/send`, { method: "POST" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["lease", id] });
+      setActionError(null);
+    },
+    onError: (err: any) =>
+      setActionError(err?.data?.error ?? err?.message ?? "Failed to send addendum"),
+  });
+
+  const handleUploadAddendum = async (sendForSig: boolean) => {
+    if (!addendumFile || !addendumTitle.trim() || !addendumEffectiveDate) return;
+    setAddendumSubmitting(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", addendumFile);
+      formData.append("title", addendumTitle.trim());
+      formData.append("effectiveDate", new Date(addendumEffectiveDate).toISOString());
+      if (addendumDescription.trim()) {
+        formData.append("description", addendumDescription.trim());
+      }
+      const addendum = await api<any>(`/leases/${id}/addendums/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      if (sendForSig) {
+        await api(`/leases/${id}/addendums/${addendum.id}/send`, { method: "POST" });
+      }
+      queryClient.invalidateQueries({ queryKey: ["lease", id] });
+      setShowUploadAddendumModal(false);
+      setAddendumFile(null);
+      setAddendumTitle("");
+      setAddendumEffectiveDate("");
+      setAddendumDescription("");
+      setActionError(null);
+    } catch (err: any) {
+      setActionError(
+        err?.data?.error?.message ?? err?.data?.error ?? err?.message ?? "Failed to upload addendum"
+      );
+    } finally {
+      setAddendumSubmitting(false);
+    }
+  };
+
+  const handleAddendumFileSelect = (f: File) => {
+    const allowed = [
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ];
+    if (!allowed.includes(f.type)) {
+      setAddendumFileError("Only PDF and DOCX files are allowed");
+      return;
+    }
+    if (f.size > 10 * 1024 * 1024) {
+      setAddendumFileError("File size must be under 10MB");
+      return;
+    }
+    setAddendumFile(f);
+    setAddendumFileError(null);
+  };
 
   // --- Action handlers ---
 
@@ -718,13 +792,38 @@ export default function LeaseDetail() {
                 Countersign
               </button>
             )}
-            <Link
-              to={`/leases/${id}/addendum`}
-              className="inline-flex items-center gap-1.5 rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-            >
-              <Plus className="h-4 w-4" />
-              Create Addendum
-            </Link>
+            <div className="relative">
+              <button
+                onClick={() => setShowAddendumDropdown((v) => !v)}
+                className="inline-flex items-center gap-1.5 rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <Plus className="h-4 w-4" />
+                Add Addendum
+                <ChevronDown className="h-3 w-3" />
+              </button>
+              {showAddendumDropdown && (
+                <div className="absolute left-0 top-full z-10 mt-1 w-48 rounded-lg border bg-white py-1 shadow-lg">
+                  <Link
+                    to={`/leases/${id}/addendum`}
+                    className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                    onClick={() => setShowAddendumDropdown(false)}
+                  >
+                    <FileText className="h-4 w-4" />
+                    Create Addendum
+                  </Link>
+                  <button
+                    onClick={() => {
+                      setShowAddendumDropdown(false);
+                      setShowUploadAddendumModal(true);
+                    }}
+                    className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    <Upload className="h-4 w-4" />
+                    Upload Addendum
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               onClick={handleTerminate}
               disabled={isMutating}
@@ -843,25 +942,59 @@ export default function LeaseDetail() {
               {addendums.map((a: any) => (
                 <div
                   key={a.id}
-                  className="flex items-center justify-between rounded-lg bg-gray-50 px-4 py-2.5"
+                  className="rounded-lg bg-gray-50 px-4 py-2.5"
                 >
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">
-                      {a.title}
-                    </p>
-                    <p className="text-xs text-gray-400">
-                      Added {fmtDate(a.createdAt)}
-                    </p>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">
+                        {a.title}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        Added {fmtDate(a.createdAt)}
+                        {a.effectiveDate && ` · Effective ${fmtDate(a.effectiveDate)}`}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {a.status === "DRAFT" && (
+                        <button
+                          onClick={() => {
+                            if (window.confirm("Send this addendum for signature to all tenants?")) {
+                              sendAddendumForSignature.mutate(a.id);
+                            }
+                          }}
+                          disabled={sendAddendumForSignature.isPending}
+                          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                        >
+                          <Send className="h-3 w-3" />
+                          Send
+                        </button>
+                      )}
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                          a.status === "ACTIVE"
+                            ? "bg-green-100 text-green-700"
+                            : a.status === "PENDING_SIGNATURE"
+                              ? "bg-yellow-100 text-yellow-700"
+                              : "bg-gray-100 text-gray-600"
+                        }`}
+                      >
+                        {a.status === "PENDING_SIGNATURE" ? "Pending Signature" : a.status}
+                      </span>
+                    </div>
                   </div>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      a.status === "ACTIVE"
-                        ? "bg-green-100 text-green-700"
-                        : "bg-gray-100 text-gray-600"
-                    }`}
-                  >
-                    {a.status}
-                  </span>
+                  {a.documentUrl && (
+                    <div className="mt-2">
+                      <a
+                        href={a.documentUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        View Document
+                      </a>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -876,14 +1009,7 @@ export default function LeaseDetail() {
             <FileText className="h-4 w-4 text-blue-600" />
             Lease Document
           </h2>
-          <div className="overflow-hidden rounded-lg border">
-            <iframe
-              src={lease.documentUrl}
-              title="Lease Document"
-              className="h-[500px] w-full"
-              sandbox="allow-same-origin"
-            />
-          </div>
+          <DocumentViewer documentUrl={lease.documentUrl} />
         </div>
       )}
 
@@ -1101,6 +1227,161 @@ export default function LeaseDetail() {
               carries the same legal weight as a handwritten signature under
               the ESIGN Act (15 U.S.C. &sect; 7001).
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Upload Addendum Modal */}
+      {showUploadAddendumModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">
+                Upload Addendum
+              </h2>
+              <button
+                onClick={() => {
+                  setShowUploadAddendumModal(false);
+                  setAddendumFile(null);
+                  setAddendumTitle("");
+                  setAddendumEffectiveDate("");
+                  setAddendumDescription("");
+                  setAddendumFileError(null);
+                }}
+                className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-4">
+              {/* File upload */}
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Document *
+                </label>
+                {!addendumFile ? (
+                  <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 px-6 py-8 hover:border-blue-400 hover:bg-blue-50">
+                    <Upload className="h-8 w-8 text-gray-400" />
+                    <p className="mt-2 text-sm text-gray-500">Click to upload PDF or DOCX</p>
+                    <p className="text-xs text-gray-400">Max 10MB</p>
+                    <input
+                      type="file"
+                      accept=".pdf,.docx"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) handleAddendumFileSelect(f);
+                        e.target.value = "";
+                      }}
+                      className="hidden"
+                    />
+                  </label>
+                ) : (
+                  <div className="flex items-center justify-between rounded-lg border bg-gray-50 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-6 w-6 text-blue-600" />
+                      <div>
+                        <p className="text-sm font-medium">{addendumFile.name}</p>
+                        <p className="text-xs text-gray-500">
+                          {(addendumFile.size / 1024).toFixed(1)} KB
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setAddendumFile(null)}
+                      className="rounded p-1 text-gray-400 hover:text-red-500"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
+                {addendumFileError && (
+                  <p className="mt-1 text-xs text-red-600">{addendumFileError}</p>
+                )}
+              </div>
+
+              {/* Title */}
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Title *
+                </label>
+                <input
+                  type="text"
+                  value={addendumTitle}
+                  onChange={(e) => setAddendumTitle(e.target.value)}
+                  placeholder='e.g. "Pet Agreement", "Rent Increase Notice"'
+                  className="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </div>
+
+              {/* Effective date */}
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Effective Date *
+                </label>
+                <input
+                  type="date"
+                  value={addendumEffectiveDate}
+                  onChange={(e) => setAddendumEffectiveDate(e.target.value)}
+                  className="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Description / Notes
+                </label>
+                <textarea
+                  rows={3}
+                  value={addendumDescription}
+                  onChange={(e) => setAddendumDescription(e.target.value)}
+                  placeholder="Optional description..."
+                  className="w-full resize-y rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowUploadAddendumModal(false);
+                    setAddendumFile(null);
+                    setAddendumTitle("");
+                    setAddendumEffectiveDate("");
+                    setAddendumDescription("");
+                    setAddendumFileError(null);
+                  }}
+                  className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleUploadAddendum(false)}
+                  disabled={
+                    !addendumFile || !addendumTitle.trim() || !addendumEffectiveDate || addendumSubmitting
+                  }
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg border bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4" />
+                  Save Draft
+                </button>
+                <button
+                  onClick={() => handleUploadAddendum(true)}
+                  disabled={
+                    !addendumFile || !addendumTitle.trim() || !addendumEffectiveDate || addendumSubmitting
+                  }
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {addendumSubmitting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                  Send
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

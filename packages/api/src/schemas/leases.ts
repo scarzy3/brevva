@@ -83,6 +83,46 @@ export const addendumIdParamSchema = z.object({
   addendumId: z.string().uuid(),
 });
 
+// Upload lease
+export const uploadLeaseSchema = z.object({
+  unitId: z.string().uuid(),
+  tenantIds: z.string().transform((s) => JSON.parse(s) as string[]),
+  primaryTenantId: z.string().uuid(),
+  startDate: z.coerce.date(),
+  endDate: z.coerce.date(),
+  monthlyRent: z.coerce.number().positive(),
+  securityDeposit: z.coerce.number().min(0),
+  lateFeeAmount: z.coerce.number().min(0).optional(),
+  lateFeeType: z.enum(["FLAT", "PERCENTAGE"]).default("FLAT"),
+  gracePeriodDays: z.coerce.number().int().min(0).default(5),
+  rentDueDay: z.coerce.number().int().min(1).max(28).default(1),
+  monthToMonth: z
+    .string()
+    .transform((v) => v === "true")
+    .optional(),
+});
+
+// Upload addendum
+export const uploadAddendumSchema = z.object({
+  title: z.string().min(1).max(200),
+  effectiveDate: z.coerce.date(),
+  description: z.string().max(50000).optional(),
+});
+
+// Addendum signing token param
+export const addendumSigningTokenParamSchema = z.object({
+  token: z.string().uuid(),
+});
+
+// Addendum send for signature
+export const addendumSendParamSchema = z.object({
+  id: z.string().uuid(),
+  addendumId: z.string().uuid(),
+});
+
+export type UploadLeaseInput = z.infer<typeof uploadLeaseSchema>;
+export type UploadAddendumInput = z.infer<typeof uploadAddendumSchema>;
+
 export type CreateLeaseInput = z.infer<typeof createLeaseSchema>;
 export type UpdateLeaseInput = z.infer<typeof updateLeaseSchema>;
 export type LeaseListQuery = z.infer<typeof leaseListQuerySchema>;
