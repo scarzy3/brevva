@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { getClientIp } from "../lib/client-ip.js";
 
@@ -56,7 +57,12 @@ export async function createAuditEntry(data: {
   ipAddress?: string | null;
 }) {
   return prisma.auditLog
-    .create({ data })
+    .create({
+      data: {
+        ...data,
+        changes: data.changes as Prisma.InputJsonValue | undefined,
+      },
+    })
     .catch((err: unknown) => {
       console.error("Failed to write audit log:", err);
     });
