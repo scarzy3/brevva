@@ -32,6 +32,7 @@ import {
   countersignLeaseSchema,
   countersignAddendumSchema,
   tokenSignLeaseSchema,
+  tokenSignAddendumSchema,
   signingTokenParamSchema,
   uploadLeaseSchema,
   uploadAddendumSchema,
@@ -851,7 +852,7 @@ router.get(
 
 router.post(
   "/addendum/sign/:token",
-  validate({ params: addendumSigningTokenParamSchema, body: tokenSignLeaseSchema }),
+  validate({ params: addendumSigningTokenParamSchema, body: tokenSignAddendumSchema }),
   asyncHandler(async (req, res) => {
     const token = param(req, "token");
     const body = req.body as { fullName: string; email: string; agreedToTerms: true; agreedToEsign: true; signatureImage?: string };
