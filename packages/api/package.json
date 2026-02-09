@@ -16,7 +16,7 @@
     "seed": "node prisma/dist/seed.js"
   },
   "dependencies": {
-    "@prisma/client": "^6.3.0",
+    "@prisma/client": "^6.19.2",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.34.0",
     "cors": "^2.8.5",
@@ -27,7 +27,6 @@
     "jsonwebtoken": "^9.0.2",
     "mailgun.js": "^10.3.0",
     "multer": "^1.4.5-lts.1",
-    "prisma": "^6.3.0",
     "stripe": "^17.5.0",
     "tsx": "^4.19.0",
     "uuid": "^11.0.5",
@@ -41,6 +40,7 @@
     "@types/multer": "^1.4.12",
     "@types/node": "^22.12.0",
     "@types/uuid": "^10.0.0",
+    "prisma": "^6.19.2",
     "typescript": "^5.7.0"
   }
 }
