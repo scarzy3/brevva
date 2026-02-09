@@ -575,6 +575,264 @@ export function saveLeaseDocument(html: string, leaseId: string): { url: string;
   return { url: `/uploads/${filename}`, hash };
 }
 
+export function saveAddendumDocument(html: string, addendumId: string): { url: string; hash: string } {
+  const hash = computeDocumentHash(html);
+  const filename = `addendum-${addendumId}-${Date.now()}.html`;
+  const uploadDir = path.resolve(env.UPLOAD_DIR);
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+  const filePath = path.join(uploadDir, filename);
+  fs.writeFileSync(filePath, html, "utf-8");
+  return { url: `/uploads/${filename}`, hash };
+}
+
+interface AddendumDocumentData {
+  addendumId: string;
+  organizationName: string;
+  property: {
+    address: string;
+    city: string;
+    state: string;
+    zip: string;
+  };
+  unitNumber: string;
+  leaseStartDate: string;
+  addendumTitle: string;
+  addendumContent: string;
+  effectiveDate?: string | null;
+  tenants: TenantInfo[];
+  landlordSignature?: {
+    fullName: string;
+    timestamp: string;
+    ip?: string;
+    signatureImage?: string;
+  } | null;
+}
+
+export function generateAddendumHTML(data: AddendumDocumentData): string {
+  const fullAddress = `${data.property.address}, ${data.property.city}, ${data.property.state} ${data.property.zip}`;
+  const premisesAddress = data.unitNumber
+    ? `${fullAddress}, Unit ${data.unitNumber}`
+    : fullAddress;
+
+  const signatureBlocksHTML = data.tenants
+    .map((t) => {
+      const label = `Tenant${t.isPrimary ? " (Primary)" : ""} \u2014 ${t.firstName} ${t.lastName}`;
+      if (t.signedAt && t.signatureData) {
+        return `<div class="signature-block">${renderSignedBlock(label, t.signatureData)}</div>`;
+      }
+      return `<div class="signature-block">${renderUnsignedBlock(label)}</div>`;
+    })
+    .join("");
+
+  const landlordLabel = `Landlord/Property Manager \u2014 ${data.organizationName}`;
+  const landlordSignatureHTML = data.landlordSignature
+    ? `<div class="signature-block">${renderSignedBlock(landlordLabel, data.landlordSignature)}</div>`
+    : `<div class="signature-block">${renderUnsignedBlock(landlordLabel)}</div>`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Addendum to Residential Lease Agreement</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Times New Roman', Georgia, serif; font-size: 12pt; line-height: 1.6; color: #222; padding: 40px 60px; max-width: 850px; margin: 0 auto; }
+    .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 20px; }
+    .header h1 { font-size: 18pt; letter-spacing: 2px; margin-bottom: 8px; text-transform: uppercase; }
+    .header .org-name { font-size: 14pt; color: #555; margin-bottom: 4px; }
+    .header .date { font-size: 10pt; color: #777; }
+    .section { margin-bottom: 24px; }
+    .section h2 { font-size: 13pt; font-weight: bold; margin-bottom: 8px; text-transform: uppercase; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+    .reference { margin-bottom: 24px; padding: 12px 16px; background: #f9f9f9; border-left: 3px solid #333; font-size: 11pt; }
+    .addendum-content { margin-bottom: 24px; }
+    .addendum-content h3 { font-size: 13pt; font-weight: bold; margin-bottom: 10px; }
+    .addendum-content .content-body { margin-left: 12px; white-space: pre-wrap; }
+    .addendum-content .content-body p { margin-bottom: 6px; }
+    .preservation { margin: 30px 0; padding: 16px; border: 1px solid #ccc; background: #f9f9f9; font-size: 11pt; font-style: italic; }
+    .signatures { margin-top: 40px; page-break-inside: avoid; }
+    .signatures h2 { font-size: 13pt; text-transform: uppercase; border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-bottom: 20px; }
+    .signature-block { margin-bottom: 24px; page-break-inside: avoid; }
+    .sig-signed { border: 2px solid #2563eb; border-radius: 8px; padding: 16px; background: #f0f7ff; }
+    .sig-badge { display: inline-block; background: #2563eb; color: #fff; font-size: 8pt; font-weight: bold; letter-spacing: 1px; padding: 2px 8px; border-radius: 3px; margin-bottom: 10px; font-family: Arial, sans-serif; }
+    .sig-visual { border-bottom: 2px solid #1e40af; padding: 8px 0 10px; margin-bottom: 10px; min-height: 50px; }
+    .sig-image { max-height: 60px; max-width: 280px; }
+    .e-signature { font-family: 'Brush Script MT', 'Segoe Script', cursive; font-size: 24pt; color: #1a365d; }
+    .sig-meta { font-size: 9pt; color: #444; font-family: Arial, sans-serif; }
+    .sig-meta-table { border-collapse: collapse; }
+    .sig-meta-table td { padding: 1px 8px 1px 0; vertical-align: top; }
+    .sig-meta-label { font-weight: bold; color: #666; white-space: nowrap; }
+    .sig-unsigned { padding: 16px 0; }
+    .sig-line { border-bottom: 1px solid #333; min-height: 40px; margin-bottom: 6px; }
+    .sig-unsigned-label { font-size: 10pt; font-weight: bold; }
+    .sig-unsigned-date { font-size: 10pt; color: #555; }
+    .disclosure { margin-top: 30px; padding: 16px; border: 1px solid #ccc; background: #f9f9f9; font-size: 10pt; page-break-inside: avoid; }
+    .disclosure h3 { font-size: 11pt; margin-bottom: 8px; }
+    .footer { margin-top: 30px; text-align: center; font-size: 9pt; color: #999; border-top: 1px solid #ccc; padding-top: 10px; }
+    @media print { body { padding: 20px 40px; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="org-name">${escapeHtml(data.organizationName)}</div>
+    <h1>Addendum to Residential Lease Agreement</h1>
+    ${data.effectiveDate ? `<div class="date">Effective Date: ${formatDate(data.effectiveDate)}</div>` : ""}
+  </div>
+
+  <div class="reference">
+    This addendum modifies the lease dated ${formatDate(data.leaseStartDate)} for the property at
+    <strong>${escapeHtml(premisesAddress)}</strong>.
+  </div>
+
+  <div class="addendum-content">
+    <h3>${escapeHtml(data.addendumTitle)}</h3>
+    <div class="content-body">${data.addendumContent}</div>
+  </div>
+
+  <div class="preservation">
+    All other terms and conditions of the original lease agreement remain in full force and effect.
+    In the event of any conflict between this addendum and the original lease, the terms of this
+    addendum shall prevail.
+  </div>
+
+  <div class="signatures">
+    <h2>Signatures</h2>
+    <p style="margin-bottom:20px;font-size:10pt;color:#555">By signing below, all parties agree to the terms and conditions set forth in this Addendum.</p>
+    ${signatureBlocksHTML}
+    ${landlordSignatureHTML}
+  </div>
+
+  <div class="disclosure">
+    <h3>Electronic Signature Disclosure</h3>
+    <p>All parties consent to the use of electronic signatures in accordance with the ESIGN Act (15 U.S.C. &sect; 7001 et seq.) and applicable state law. Electronic signatures are legally binding and enforceable.</p>
+  </div>
+
+  <div class="footer">
+    <p>Generated by ${escapeHtml(data.organizationName)} via Brevva Property Management</p>
+    <p>Addendum ID: ${data.addendumId}</p>
+  </div>
+</body>
+</html>`;
+}
+
+export function generateAddendumCertificateHTML(data: {
+  addendumId: string;
+  addendumTitle: string;
+  propertyAddress: string;
+  createdAt: string;
+  completedAt: string;
+  documentHash: string;
+  signers: CertificateSignerInfo[];
+}): string {
+  const signerRows = data.signers
+    .map(
+      (s) => `
+      <tr>
+        <td>${escapeHtml(s.role)}</td>
+        <td>${escapeHtml(s.name)}</td>
+        <td>${escapeHtml(s.email)}</td>
+        <td>${formatDateTime(s.signedAt)}</td>
+        <td style="font-family:monospace;font-size:9pt">${escapeHtml(s.ipAddress)}</td>
+        <td>${s.location ? escapeHtml(s.location) : "\u2014"}</td>
+        <td>${formatViewTime(s.viewTimeSeconds)}</td>
+      </tr>`
+    )
+    .join("");
+
+  return `
+<div class="certificate-page" style="page-break-before: always;">
+  <style>
+    .certificate-page {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 10pt;
+      color: #222;
+      padding: 40px 60px;
+      max-width: 850px;
+      margin: 0 auto;
+    }
+    .cert-header { text-align: center; border-bottom: 3px solid #2563eb; padding-bottom: 20px; margin-bottom: 24px; }
+    .cert-logo { font-size: 20pt; font-weight: bold; color: #2563eb; letter-spacing: 4px; }
+    .cert-title { font-size: 16pt; font-weight: bold; margin-top: 8px; letter-spacing: 1px; color: #333; }
+    .cert-section { margin-bottom: 20px; }
+    .cert-section h3 { font-size: 11pt; font-weight: bold; color: #2563eb; border-bottom: 1px solid #ddd; padding-bottom: 4px; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .cert-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; }
+    .cert-info-grid .label { font-weight: bold; color: #555; font-size: 9pt; }
+    .cert-info-grid .value { font-size: 10pt; }
+    .cert-table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+    .cert-table th { background: #f0f4f8; border: 1px solid #ddd; padding: 6px 8px; text-align: left; font-weight: bold; color: #333; }
+    .cert-table td { border: 1px solid #ddd; padding: 5px 8px; vertical-align: top; }
+    .cert-hash { font-family: monospace; font-size: 8pt; word-break: break-all; background: #f5f5f5; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+    .cert-legal { font-size: 9pt; color: #444; line-height: 1.5; border: 1px solid #ccc; background: #fafafa; padding: 12px; border-radius: 4px; }
+    .cert-footer { margin-top: 24px; text-align: center; font-size: 8pt; color: #999; border-top: 1px solid #ddd; padding-top: 10px; }
+  </style>
+
+  <div class="cert-header">
+    <div class="cert-logo">BREVVA</div>
+    <div class="cert-title">CERTIFICATE OF COMPLETION</div>
+  </div>
+
+  <div class="cert-section">
+    <h3>Document Information</h3>
+    <div class="cert-info-grid">
+      <div><span class="label">Document Title:</span></div>
+      <div><span class="value">Lease Addendum: ${escapeHtml(data.addendumTitle)}</span></div>
+      <div><span class="label">Document ID:</span></div>
+      <div><span class="value" style="font-family:monospace;font-size:9pt">${escapeHtml(data.addendumId)}</span></div>
+      <div><span class="label">Property:</span></div>
+      <div><span class="value">${escapeHtml(data.propertyAddress)}</span></div>
+      <div><span class="label">Created:</span></div>
+      <div><span class="value">${formatDateTime(data.createdAt)}</span></div>
+      <div><span class="label">Completed:</span></div>
+      <div><span class="value">${formatDateTime(data.completedAt)}</span></div>
+    </div>
+  </div>
+
+  <div class="cert-section">
+    <h3>Signing Summary</h3>
+    <table class="cert-table">
+      <thead>
+        <tr>
+          <th>Role</th>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Signed At</th>
+          <th>IP Address</th>
+          <th>Location</th>
+          <th>Time Viewing</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${signerRows}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="cert-section">
+    <h3>Document Integrity</h3>
+    <p style="margin-bottom:6px"><strong>Document Hash (SHA-256):</strong></p>
+    <div class="cert-hash">${escapeHtml(data.documentHash)}</div>
+    <p style="margin-top:6px;font-size:9pt;color:#666">This hash can be used to verify the document has not been modified since signing.</p>
+  </div>
+
+  <div class="cert-section">
+    <h3>Legal Statement</h3>
+    <div class="cert-legal">
+      This document was signed electronically via Brevva (brevva.io). All parties consented to electronic
+      signatures. Electronic signatures are legally binding under the Electronic Signatures in Global and
+      National Commerce Act (ESIGN Act, 15 U.S.C. &sect; 7001) and the Uniform Electronic Transactions Act (UETA).
+      Each signer's identity was verified through their email address, and their signing session was recorded
+      including IP address, device information, document viewing time, and explicit consent.
+    </div>
+  </div>
+
+  <div class="cert-footer">
+    <p>Certificate generated by Brevva on ${formatDateTime(new Date().toISOString())}</p>
+    <p>For questions about this document, contact support@brevva.io</p>
+  </div>
+</div>`;
+}
+
 export const DEFAULT_CLAUSES: LeaseClause[] = [
   {
     id: "rent-payment",

@@ -27,8 +27,10 @@ import {
   leaseIdParamSchema,
   signLeaseSchema,
   createAddendumSchema,
+  updateAddendumSchema,
   addendumIdParamSchema,
   countersignLeaseSchema,
+  countersignAddendumSchema,
   tokenSignLeaseSchema,
   signingTokenParamSchema,
   uploadLeaseSchema,
@@ -39,6 +41,7 @@ import {
 import type {
   CreateLeaseInput,
   UpdateLeaseInput,
+  UpdateAddendumInput,
   LeaseListQuery,
   SignLeaseInput,
   CreateAddendumInput,
@@ -48,13 +51,17 @@ import type {
 import {
   generateLeaseHTML,
   generateCertificateHTML,
+  generateAddendumHTML,
+  generateAddendumCertificateHTML,
   saveLeaseDocument,
+  saveAddendumDocument,
   DEFAULT_CLAUSES,
 } from "../services/leaseDocument.js";
 import type { CertificateSignerInfo } from "../services/leaseDocument.js";
 import {
   sendEmail,
   buildSignatureRequestEmail,
+  buildAddendumSignatureRequestEmail,
   buildLeaseSignedConfirmationEmail,
   buildWelcomeTenantEmail,
 } from "../services/email.js";
@@ -221,6 +228,131 @@ async function regenerateLeaseDocument(leaseId: string) {
   const { url, hash } = saveLeaseDocument(html, lease.id);
   await prisma.lease.update({
     where: { id: lease.id },
+    data: { documentUrl: url, documentHash: hash },
+  });
+}
+
+/**
+ * Regenerate the addendum HTML document with current signature data
+ * and update the stored file. Called after each signature event.
+ * When all parties have signed (tenants + landlord), appends a Certificate of Completion.
+ */
+async function regenerateAddendumDocument(addendumId: string) {
+  const addendum = await prisma.leaseAddendum.findUnique({
+    where: { id: addendumId },
+    include: {
+      lease: {
+        include: {
+          organization: { select: { name: true } },
+          unit: {
+            select: {
+              unitNumber: true,
+              property: {
+                select: { name: true, address: true, city: true, state: true, zip: true },
+              },
+            },
+          },
+        },
+      },
+      signatures: {
+        include: {
+          tenant: {
+            select: { id: true, firstName: true, lastName: true, email: true, phone: true },
+          },
+        },
+      },
+    },
+  });
+  if (!addendum) return;
+
+  const lease = addendum.lease;
+  const landlordSigData = addendum.landlordSignatureData as Record<string, unknown> | null;
+
+  // Determine isPrimary from lease tenants
+  const leaseTenants = await prisma.leaseTenant.findMany({
+    where: { leaseId: lease.id },
+    select: { tenantId: true, isPrimary: true },
+  });
+  const primaryMap = new Map(leaseTenants.map((lt) => [lt.tenantId, lt.isPrimary]));
+
+  let html = generateAddendumHTML({
+    addendumId: addendum.id,
+    organizationName: lease.organization.name,
+    property: {
+      address: lease.unit.property.address,
+      city: lease.unit.property.city,
+      state: lease.unit.property.state,
+      zip: lease.unit.property.zip,
+    },
+    unitNumber: lease.unit.unitNumber,
+    leaseStartDate: lease.startDate.toISOString(),
+    addendumTitle: addendum.title,
+    addendumContent: addendum.content,
+    effectiveDate: addendum.effectiveDate?.toISOString() ?? null,
+    tenants: addendum.signatures.map((sig) => ({
+      id: sig.tenant.id,
+      firstName: sig.tenant.firstName,
+      lastName: sig.tenant.lastName,
+      email: sig.tenant.email,
+      phone: sig.tenant.phone,
+      isPrimary: primaryMap.get(sig.tenantId) ?? false,
+      signedAt: sig.signedAt?.toISOString() ?? null,
+      signatureData: sig.signatureData as any ?? null,
+    })),
+    landlordSignature: landlordSigData
+      ? {
+          fullName: landlordSigData["fullName"] as string,
+          timestamp: landlordSigData["timestamp"] as string,
+          ip: landlordSigData["ip"] as string | undefined,
+          signatureImage: landlordSigData["signatureImage"] as string | undefined,
+        }
+      : null,
+  });
+
+  // If all tenants AND landlord have signed, append Certificate of Completion
+  const allTenantsSigned = addendum.signatures.every((s) => s.signedAt);
+  if (allTenantsSigned && addendum.landlordSignedAt && landlordSigData) {
+    const propertyAddress = `${lease.unit.property.address}, ${lease.unit.property.city}, ${lease.unit.property.state} ${lease.unit.property.zip}, Unit ${lease.unit.unitNumber}`;
+
+    const signers: CertificateSignerInfo[] = addendum.signatures.map((sig) => {
+      const sd = sig.signatureData as Record<string, unknown> | null;
+      return {
+        role: primaryMap.get(sig.tenantId) ? "Tenant (Primary)" : "Tenant",
+        name: `${sig.tenant.firstName} ${sig.tenant.lastName}`,
+        email: sig.tenant.email,
+        signedAt: sd?.["timestamp"] as string ?? sig.signedAt!.toISOString(),
+        ipAddress: sd?.["ipAddress"] as string ?? sd?.["ip"] as string ?? "unknown",
+        location: sd?.["ipCountry"] as string ?? null,
+        viewTimeSeconds: sd?.["totalViewTimeSeconds"] as number ?? null,
+      };
+    });
+
+    signers.push({
+      role: "Landlord",
+      name: landlordSigData["fullName"] as string,
+      email: landlordSigData["email"] as string ?? "",
+      signedAt: landlordSigData["timestamp"] as string ?? addendum.landlordSignedAt.toISOString(),
+      ipAddress: landlordSigData["ipAddress"] as string ?? landlordSigData["ip"] as string ?? "unknown",
+      location: landlordSigData["ipCountry"] as string ?? null,
+      viewTimeSeconds: landlordSigData["totalViewTimeSeconds"] as number ?? null,
+    });
+
+    const certHtml = generateAddendumCertificateHTML({
+      addendumId: addendum.id,
+      addendumTitle: addendum.title,
+      propertyAddress,
+      createdAt: addendum.createdAt.toISOString(),
+      completedAt: new Date().toISOString(),
+      documentHash: addendum.documentHash ?? "",
+      signers,
+    });
+
+    html = html.replace("</body>", `${certHtml}\n</body>`);
+  }
+
+  const { url, hash } = saveAddendumDocument(html, addendum.id);
+  await prisma.leaseAddendum.update({
+    where: { id: addendum.id },
     data: { documentUrl: url, documentHash: hash },
   });
 }
@@ -804,15 +936,18 @@ router.post(
     if (unsignedCount === 0) {
       await prisma.leaseAddendum.update({
         where: { id: addendum.id },
-        data: { status: "ACTIVE" },
+        data: { status: "SIGNED" },
       });
-      addendumStatus = "ACTIVE";
+      addendumStatus = "SIGNED";
     }
+
+    // Regenerate addendum document with updated signature data
+    await regenerateAddendumDocument(addendum.id);
 
     res.json({
       message:
-        addendumStatus === "ACTIVE"
-          ? "Addendum fully signed and activated"
+        addendumStatus === "SIGNED"
+          ? "Addendum fully signed"
           : "Signature recorded successfully",
       addendumStatus,
       signedAt: signatureData.timestamp,
@@ -1192,6 +1327,15 @@ router.get(
         },
         addendums: {
           orderBy: { createdAt: "desc" },
+          include: {
+            signatures: {
+              include: {
+                tenant: {
+                  select: { id: true, firstName: true, lastName: true, email: true },
+                },
+              },
+            },
+          },
         },
         payments: {
           orderBy: { createdAt: "desc" },
@@ -2222,8 +2366,8 @@ router.delete(
       throw new NotFoundError("Addendum", param(req, "addendumId"));
     }
 
-    if (addendum.status === "ACTIVE") {
-      throw new ValidationError("Cannot delete an active addendum");
+    if (addendum.status === "SIGNED") {
+      throw new ValidationError("Cannot delete a signed addendum");
     }
 
     await prisma.leaseAddendum.delete({
@@ -2378,6 +2522,40 @@ router.post(
       });
     }
 
+    // Generate addendum document (only for text-based addendums without an uploaded file)
+    if (!addendum.documentUrl) {
+      const leaseTenants = lease.tenants;
+      const docHtml = generateAddendumHTML({
+        addendumId: addendum.id,
+        organizationName: lease.organization.name,
+        property: {
+          address: lease.unit.property.address,
+          city: lease.unit.property.city,
+          state: lease.unit.property.state,
+          zip: lease.unit.property.zip,
+        },
+        unitNumber: lease.unit.unitNumber,
+        leaseStartDate: lease.startDate.toISOString(),
+        addendumTitle: addendum.title,
+        addendumContent: addendum.content,
+        effectiveDate: addendum.effectiveDate?.toISOString() ?? null,
+        tenants: leaseTenants.map((lt) => ({
+          id: lt.tenant.id,
+          firstName: lt.tenant.firstName,
+          lastName: lt.tenant.lastName,
+          email: lt.tenant.email,
+          isPrimary: lt.isPrimary,
+          signedAt: null,
+          signatureData: null,
+        })),
+      });
+      const { url: docUrl, hash: docHash } = saveAddendumDocument(docHtml, addendum.id);
+      await prisma.leaseAddendum.update({
+        where: { id: addendum.id },
+        data: { documentUrl: docUrl, documentHash: docHash },
+      });
+    }
+
     // Update addendum status
     await prisma.leaseAddendum.update({
       where: { id: addendum.id },
@@ -2388,10 +2566,11 @@ router.post(
     const propertyAddress = `${lease.unit.property.address}, ${lease.unit.property.city}, ${lease.unit.property.state}`;
     for (const st of signingTokens) {
       const signingUrl = `${env.PORTAL_URL}/sign/addendum/${st.token}`;
-      const emailContent = buildSignatureRequestEmail({
+      const emailContent = buildAddendumSignatureRequestEmail({
         tenantName: st.name,
         propertyAddress,
         unitNumber: lease.unit.unitNumber,
+        addendumTitle: addendum.title,
         signingUrl,
         landlordName: lease.organization.name,
       });
@@ -2405,6 +2584,331 @@ router.post(
         name: st.name,
         email: st.email,
       })),
+    });
+  })
+);
+
+// ─── GET /leases/:id/addendums/:addendumId ─────────────────────────
+router.get(
+  "/:id/addendums/:addendumId",
+  validate({ params: addendumIdParamSchema }),
+  asyncHandler(async (req, res) => {
+    const orgId = req.organizationId!;
+
+    const lease = await prisma.lease.findFirst({
+      where: { id: param(req, "id"), organizationId: orgId },
+      select: { id: true },
+    });
+    if (!lease) {
+      throw new NotFoundError("Lease", param(req, "id"));
+    }
+
+    const addendum = await prisma.leaseAddendum.findFirst({
+      where: {
+        id: param(req, "addendumId"),
+        leaseId: param(req, "id"),
+      },
+      include: {
+        signatures: {
+          include: {
+            tenant: {
+              select: { id: true, firstName: true, lastName: true, email: true },
+            },
+          },
+        },
+      },
+    });
+    if (!addendum) {
+      throw new NotFoundError("Addendum", param(req, "addendumId"));
+    }
+
+    res.json({ data: addendum });
+  })
+);
+
+// ─── PATCH /leases/:id/addendums/:addendumId ───────────────────────
+// Edit a draft addendum
+router.patch(
+  "/:id/addendums/:addendumId",
+  requireMinRole("TEAM_MEMBER"),
+  validate({ params: addendumIdParamSchema, body: updateAddendumSchema }),
+  auditLog("UPDATE", "LeaseAddendum"),
+  asyncHandler(async (req, res) => {
+    const orgId = req.organizationId!;
+    const body = req.body as UpdateAddendumInput;
+
+    const lease = await prisma.lease.findFirst({
+      where: { id: param(req, "id"), organizationId: orgId },
+      select: { id: true },
+    });
+    if (!lease) {
+      throw new NotFoundError("Lease", param(req, "id"));
+    }
+
+    const addendum = await prisma.leaseAddendum.findFirst({
+      where: {
+        id: param(req, "addendumId"),
+        leaseId: param(req, "id"),
+      },
+    });
+    if (!addendum) {
+      throw new NotFoundError("Addendum", param(req, "addendumId"));
+    }
+
+    if (addendum.status !== "DRAFT") {
+      throw new ValidationError("Only DRAFT addendums can be edited");
+    }
+
+    const updated = await prisma.leaseAddendum.update({
+      where: { id: addendum.id },
+      data: {
+        ...(body.title !== undefined ? { title: body.title } : {}),
+        ...(body.content !== undefined ? { content: body.content } : {}),
+        ...(body.effectiveDate !== undefined ? { effectiveDate: body.effectiveDate } : {}),
+      },
+    });
+
+    res.json(updated);
+  })
+);
+
+// ─── POST /leases/:id/addendums/:addendumId/void ───────────────────
+// Void a pending-signature addendum
+router.post(
+  "/:id/addendums/:addendumId/void",
+  requireMinRole("TEAM_MEMBER"),
+  validate({ params: addendumIdParamSchema }),
+  auditLog("VOID", "LeaseAddendum"),
+  asyncHandler(async (req, res) => {
+    const orgId = req.organizationId!;
+
+    const lease = await prisma.lease.findFirst({
+      where: { id: param(req, "id"), organizationId: orgId },
+      select: { id: true },
+    });
+    if (!lease) {
+      throw new NotFoundError("Lease", param(req, "id"));
+    }
+
+    const addendum = await prisma.leaseAddendum.findFirst({
+      where: {
+        id: param(req, "addendumId"),
+        leaseId: param(req, "id"),
+      },
+    });
+    if (!addendum) {
+      throw new NotFoundError("Addendum", param(req, "addendumId"));
+    }
+
+    if (addendum.status !== "PENDING_SIGNATURE") {
+      throw new ValidationError(
+        `Only PENDING_SIGNATURE addendums can be voided (currently ${addendum.status})`
+      );
+    }
+
+    // Void the addendum and clear all signing tokens
+    await prisma.$transaction([
+      prisma.leaseAddendum.update({
+        where: { id: addendum.id },
+        data: { status: "VOID" },
+      }),
+      prisma.leaseAddendumSignature.updateMany({
+        where: { addendumId: addendum.id },
+        data: { signingToken: null, tokenExpiresAt: null },
+      }),
+    ]);
+
+    res.json({ message: "Addendum voided successfully" });
+  })
+);
+
+// ─── POST /leases/:id/addendums/:addendumId/resend ─────────────────
+// Resend signing emails for pending-signature addendums
+router.post(
+  "/:id/addendums/:addendumId/resend",
+  requireMinRole("TEAM_MEMBER"),
+  validate({ params: addendumIdParamSchema }),
+  auditLog("RESEND_SIGNATURE", "LeaseAddendum"),
+  asyncHandler(async (req, res) => {
+    const orgId = req.organizationId!;
+
+    const lease = await prisma.lease.findFirst({
+      where: { id: param(req, "id"), organizationId: orgId },
+      include: {
+        organization: { select: { name: true } },
+        unit: {
+          select: {
+            unitNumber: true,
+            property: {
+              select: { address: true, city: true, state: true, zip: true },
+            },
+          },
+        },
+      },
+    });
+    if (!lease) {
+      throw new NotFoundError("Lease", param(req, "id"));
+    }
+
+    const addendum = await prisma.leaseAddendum.findFirst({
+      where: {
+        id: param(req, "addendumId"),
+        leaseId: param(req, "id"),
+      },
+      include: {
+        signatures: {
+          include: {
+            tenant: {
+              select: { id: true, firstName: true, lastName: true, email: true },
+            },
+          },
+        },
+      },
+    });
+    if (!addendum) {
+      throw new NotFoundError("Addendum", param(req, "addendumId"));
+    }
+
+    if (addendum.status !== "PENDING_SIGNATURE") {
+      throw new ValidationError("Can only resend for PENDING_SIGNATURE addendums");
+    }
+
+    const unsignedSigs = addendum.signatures.filter((s) => !s.signedAt);
+    const tokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const propertyAddress = `${lease.unit.property.address}, ${lease.unit.property.city}, ${lease.unit.property.state}`;
+
+    for (const sig of unsignedSigs) {
+      const token = randomUUID();
+      await prisma.leaseAddendumSignature.update({
+        where: { id: sig.id },
+        data: { signingToken: token, tokenExpiresAt: tokenExpiry },
+      });
+
+      const signingUrl = `${env.PORTAL_URL}/sign/addendum/${token}`;
+      const emailContent = buildAddendumSignatureRequestEmail({
+        tenantName: `${sig.tenant.firstName} ${sig.tenant.lastName}`,
+        propertyAddress,
+        unitNumber: lease.unit.unitNumber,
+        addendumTitle: addendum.title,
+        signingUrl,
+        landlordName: lease.organization.name,
+      });
+      sendEmail({ to: sig.tenant.email, ...emailContent }).catch(() => {});
+    }
+
+    res.json({
+      message: `Signing emails resent to ${unsignedSigs.length} tenant(s)`,
+      resentTo: unsignedSigs.map((s) => s.tenant.email),
+    });
+  })
+);
+
+// ─── POST /leases/:id/addendums/:addendumId/countersign ────────────
+// Landlord countersigns after all tenants have signed
+router.post(
+  "/:id/addendums/:addendumId/countersign",
+  requireMinRole("TEAM_MEMBER"),
+  validate({ params: addendumIdParamSchema, body: countersignAddendumSchema }),
+  auditLog("COUNTERSIGN", "LeaseAddendum"),
+  asyncHandler(async (req, res) => {
+    const orgId = req.organizationId!;
+    const body = req.body as {
+      fullName: string;
+      signatureImage?: string;
+      signingMetadata?: {
+        screenResolution?: string;
+        timezone?: string;
+        browserLanguage?: string;
+        platform?: string;
+        pageOpenedAt?: string;
+        consent1CheckedAt?: string;
+        consent2CheckedAt?: string;
+        nameTypedAt?: string;
+        signedAt?: string;
+        totalViewTimeSeconds?: number;
+      };
+    };
+
+    const lease = await prisma.lease.findFirst({
+      where: { id: param(req, "id"), organizationId: orgId },
+      select: { id: true },
+    });
+    if (!lease) {
+      throw new NotFoundError("Lease", param(req, "id"));
+    }
+
+    const addendum = await prisma.leaseAddendum.findFirst({
+      where: {
+        id: param(req, "addendumId"),
+        leaseId: param(req, "id"),
+      },
+    });
+    if (!addendum) {
+      throw new NotFoundError("Addendum", param(req, "addendumId"));
+    }
+
+    if (addendum.status !== "SIGNED") {
+      throw new ValidationError("Addendum must be SIGNED (by all tenants) to countersign");
+    }
+
+    if (addendum.landlordSignedAt) {
+      throw new ValidationError("Landlord has already countersigned this addendum");
+    }
+
+    const now = new Date();
+    const csClientIp = getClientIp(req);
+    const csIpCountry = getClientCountry(req);
+    const csMetadata = body.signingMetadata ?? {};
+
+    const landlordSignatureData = {
+      fullName: body.fullName,
+      email: req.user?.email ?? "",
+      ipAddress: csClientIp,
+      ipCountry: csIpCountry ?? undefined,
+      ip: csClientIp,
+      userAgent: req.headers["user-agent"] ?? "unknown",
+      screenResolution: csMetadata.screenResolution ?? undefined,
+      timezone: csMetadata.timezone ?? undefined,
+      browserLanguage: csMetadata.browserLanguage ?? undefined,
+      platform: csMetadata.platform ?? undefined,
+      pageOpenedAt: csMetadata.pageOpenedAt ?? undefined,
+      consent1CheckedAt: csMetadata.consent1CheckedAt ?? undefined,
+      consent2CheckedAt: csMetadata.consent2CheckedAt ?? undefined,
+      nameTypedAt: csMetadata.nameTypedAt ?? undefined,
+      signedAt: now.toISOString(),
+      totalViewTimeSeconds: csMetadata.totalViewTimeSeconds ?? undefined,
+      documentHash: addendum.documentHash ?? "",
+      timestamp: now.toISOString(),
+      ...(body.signatureImage ? { signatureImage: body.signatureImage } : {}),
+    };
+
+    await prisma.leaseAddendum.update({
+      where: { id: addendum.id },
+      data: {
+        landlordSignedAt: now,
+        landlordSignatureData: landlordSignatureData as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    createAuditEntry({
+      organizationId: orgId,
+      userId: req.user!.userId,
+      action: "ALL_PARTIES_SIGNED",
+      entityType: "LeaseAddendum",
+      entityId: addendum.id,
+      changes: {
+        note: "Landlord countersigned addendum - all parties have signed",
+        landlordName: body.fullName,
+      },
+      ipAddress: csClientIp,
+    });
+
+    // Regenerate addendum document with landlord signature and certificate
+    await regenerateAddendumDocument(addendum.id);
+
+    res.json({
+      message: "Addendum countersigned successfully",
+      landlordSignedAt: now.toISOString(),
     });
   })
 );
