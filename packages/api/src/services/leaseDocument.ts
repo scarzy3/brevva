@@ -64,6 +64,25 @@ interface LeaseDocumentData {
   } | null;
 }
 
+export interface CertificateSignerInfo {
+  role: string;
+  name: string;
+  email: string;
+  signedAt: string;
+  ipAddress: string;
+  location: string | null;
+  viewTimeSeconds: number | null;
+}
+
+export interface CertificateData {
+  leaseId: string;
+  propertyAddress: string;
+  createdAt: string;
+  completedAt: string;
+  documentHash: string;
+  signers: CertificateSignerInfo[];
+}
+
 function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-US", {
     year: "numeric",
@@ -128,6 +147,201 @@ function renderUnsignedBlock(label: string): string {
       <p class="sig-unsigned-label">${escapeHtml(label)}</p>
       <p class="sig-unsigned-date">Date: ________________</p>
     </div>`;
+}
+
+function formatViewTime(seconds: number | null): string {
+  if (seconds == null) return "N/A";
+  const min = Math.floor(seconds / 60);
+  const sec = Math.round(seconds % 60);
+  if (min === 0) return `${sec} sec`;
+  return `${min} min ${sec} sec`;
+}
+
+/**
+ * Generate a Certificate of Completion HTML page to append to the signed document.
+ */
+export function generateCertificateHTML(data: CertificateData): string {
+  const signerRows = data.signers
+    .map(
+      (s) => `
+      <tr>
+        <td>${escapeHtml(s.role)}</td>
+        <td>${escapeHtml(s.name)}</td>
+        <td>${escapeHtml(s.email)}</td>
+        <td>${formatDateTime(s.signedAt)}</td>
+        <td style="font-family:monospace;font-size:9pt">${escapeHtml(s.ipAddress)}</td>
+        <td>${s.location ? escapeHtml(s.location) : "—"}</td>
+        <td>${formatViewTime(s.viewTimeSeconds)}</td>
+      </tr>`
+    )
+    .join("");
+
+  return `
+<div class="certificate-page" style="page-break-before: always;">
+  <style>
+    .certificate-page {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 10pt;
+      color: #222;
+      padding: 40px 60px;
+      max-width: 850px;
+      margin: 0 auto;
+    }
+    .cert-header {
+      text-align: center;
+      border-bottom: 3px solid #2563eb;
+      padding-bottom: 20px;
+      margin-bottom: 24px;
+    }
+    .cert-logo {
+      font-size: 20pt;
+      font-weight: bold;
+      color: #2563eb;
+      letter-spacing: 4px;
+    }
+    .cert-title {
+      font-size: 16pt;
+      font-weight: bold;
+      margin-top: 8px;
+      letter-spacing: 1px;
+      color: #333;
+    }
+    .cert-section {
+      margin-bottom: 20px;
+    }
+    .cert-section h3 {
+      font-size: 11pt;
+      font-weight: bold;
+      color: #2563eb;
+      border-bottom: 1px solid #ddd;
+      padding-bottom: 4px;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .cert-info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 24px;
+    }
+    .cert-info-grid .label {
+      font-weight: bold;
+      color: #555;
+      font-size: 9pt;
+    }
+    .cert-info-grid .value {
+      font-size: 10pt;
+    }
+    .cert-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9pt;
+    }
+    .cert-table th {
+      background: #f0f4f8;
+      border: 1px solid #ddd;
+      padding: 6px 8px;
+      text-align: left;
+      font-weight: bold;
+      color: #333;
+    }
+    .cert-table td {
+      border: 1px solid #ddd;
+      padding: 5px 8px;
+      vertical-align: top;
+    }
+    .cert-hash {
+      font-family: monospace;
+      font-size: 8pt;
+      word-break: break-all;
+      background: #f5f5f5;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    .cert-legal {
+      font-size: 9pt;
+      color: #444;
+      line-height: 1.5;
+      border: 1px solid #ccc;
+      background: #fafafa;
+      padding: 12px;
+      border-radius: 4px;
+    }
+    .cert-footer {
+      margin-top: 24px;
+      text-align: center;
+      font-size: 8pt;
+      color: #999;
+      border-top: 1px solid #ddd;
+      padding-top: 10px;
+    }
+  </style>
+
+  <div class="cert-header">
+    <div class="cert-logo">BREVVA</div>
+    <div class="cert-title">CERTIFICATE OF COMPLETION</div>
+  </div>
+
+  <div class="cert-section">
+    <h3>Document Information</h3>
+    <div class="cert-info-grid">
+      <div><span class="label">Document Title:</span></div>
+      <div><span class="value">Residential Lease Agreement</span></div>
+      <div><span class="label">Document ID:</span></div>
+      <div><span class="value" style="font-family:monospace;font-size:9pt">${escapeHtml(data.leaseId)}</span></div>
+      <div><span class="label">Property:</span></div>
+      <div><span class="value">${escapeHtml(data.propertyAddress)}</span></div>
+      <div><span class="label">Created:</span></div>
+      <div><span class="value">${formatDateTime(data.createdAt)}</span></div>
+      <div><span class="label">Completed:</span></div>
+      <div><span class="value">${formatDateTime(data.completedAt)}</span></div>
+    </div>
+  </div>
+
+  <div class="cert-section">
+    <h3>Signing Summary</h3>
+    <table class="cert-table">
+      <thead>
+        <tr>
+          <th>Role</th>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Signed At</th>
+          <th>IP Address</th>
+          <th>Location</th>
+          <th>Time Viewing</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${signerRows}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="cert-section">
+    <h3>Document Integrity</h3>
+    <p style="margin-bottom:6px"><strong>Document Hash (SHA-256):</strong></p>
+    <div class="cert-hash">${escapeHtml(data.documentHash)}</div>
+    <p style="margin-top:6px;font-size:9pt;color:#666">This hash can be used to verify the document has not been modified since signing.</p>
+  </div>
+
+  <div class="cert-section">
+    <h3>Legal Statement</h3>
+    <div class="cert-legal">
+      This document was signed electronically via Brevva (brevva.io). All parties consented to electronic
+      signatures. Electronic signatures are legally binding under the Electronic Signatures in Global and
+      National Commerce Act (ESIGN Act, 15 U.S.C. &sect; 7001) and the Uniform Electronic Transactions Act (UETA).
+      Each signer's identity was verified through their email address, and their signing session was recorded
+      including IP address, device information, document viewing time, and explicit consent.
+    </div>
+  </div>
+
+  <div class="cert-footer">
+    <p>Certificate generated by Brevva on ${formatDateTime(new Date().toISOString())}</p>
+    <p>For questions about this document, contact support@brevva.io</p>
+  </div>
+</div>`;
 }
 
 export function generateLeaseHTML(data: LeaseDocumentData): string {

@@ -49,6 +49,23 @@ export const signLeaseSchema = z.object({
   signatureImage: z.string().max(100000).optional(),
 });
 
+// Browser-side metadata collected during signing
+const signingMetadataSchema = z.object({
+  screenResolution: z.string().max(50).optional(),
+  timezone: z.string().max(100).optional(),
+  browserLanguage: z.string().max(50).optional(),
+  platform: z.string().max(100).optional(),
+  pageOpenedAt: z.string().max(50).optional(),
+  documentViewedAt: z.string().max(50).optional(),
+  scrolledToBottomAt: z.string().max(50).optional(),
+  consent1CheckedAt: z.string().max(50).optional(),
+  consent2CheckedAt: z.string().max(50).optional(),
+  consent3CheckedAt: z.string().max(50).optional(),
+  nameTypedAt: z.string().max(50).optional(),
+  signedAt: z.string().max(50).optional(),
+  totalViewTimeSeconds: z.number().min(0).optional(),
+});
+
 // E-signature (token-based, no auth)
 export const tokenSignLeaseSchema = z.object({
   fullName: z.string().min(1).max(200),
@@ -59,7 +76,11 @@ export const tokenSignLeaseSchema = z.object({
   agreedToEsign: z.literal(true, {
     errorMap: () => ({ message: "You must agree to use electronic signatures" }),
   }),
+  agreedToIdentity: z.literal(true, {
+    errorMap: () => ({ message: "You must confirm your identity" }),
+  }),
   signatureImage: z.string().max(100000).optional(),
+  signingMetadata: signingMetadataSchema.optional(),
 });
 
 export const signingTokenParamSchema = z.object({
@@ -70,6 +91,10 @@ export const signingTokenParamSchema = z.object({
 export const countersignLeaseSchema = z.object({
   fullName: z.string().min(1).max(200),
   signatureImage: z.string().max(100000).optional(),
+  agreedToTerms: z.literal(true).optional(),
+  agreedToEsign: z.literal(true).optional(),
+  agreedToIdentity: z.literal(true).optional(),
+  signingMetadata: signingMetadataSchema.optional(),
 });
 
 // Addendums
