@@ -148,8 +148,36 @@ export const addendumSendParamSchema = z.object({
 export type UploadLeaseInput = z.infer<typeof uploadLeaseSchema>;
 export type UploadAddendumInput = z.infer<typeof uploadAddendumSchema>;
 
+// Update addendum (edit draft)
+export const updateAddendumSchema = z.object({
+  title: z.string().min(1).max(200).optional(),
+  content: z.string().min(1).max(50000).optional(),
+  effectiveDate: z.coerce.date().optional().nullable(),
+});
+
+// Countersign addendum
+export const countersignAddendumSchema = z.object({
+  fullName: z.string().min(1).max(200),
+  signatureImage: z.string().max(100000).optional(),
+  agreedToTerms: z.literal(true).optional(),
+  agreedToEsign: z.literal(true).optional(),
+  signingMetadata: z.object({
+    screenResolution: z.string().max(50).optional(),
+    timezone: z.string().max(100).optional(),
+    browserLanguage: z.string().max(50).optional(),
+    platform: z.string().max(100).optional(),
+    pageOpenedAt: z.string().max(50).optional(),
+    consent1CheckedAt: z.string().max(50).optional(),
+    consent2CheckedAt: z.string().max(50).optional(),
+    nameTypedAt: z.string().max(50).optional(),
+    signedAt: z.string().max(50).optional(),
+    totalViewTimeSeconds: z.number().min(0).optional(),
+  }).optional(),
+});
+
 export type CreateLeaseInput = z.infer<typeof createLeaseSchema>;
 export type UpdateLeaseInput = z.infer<typeof updateLeaseSchema>;
 export type LeaseListQuery = z.infer<typeof leaseListQuerySchema>;
 export type SignLeaseInput = z.infer<typeof signLeaseSchema>;
 export type CreateAddendumInput = z.infer<typeof createAddendumSchema>;
+export type UpdateAddendumInput = z.infer<typeof updateAddendumSchema>;

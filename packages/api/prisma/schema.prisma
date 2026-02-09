@@ -74,7 +74,8 @@ enum LeaseStatus {
 enum LeaseAddendumStatus {
   DRAFT
   PENDING_SIGNATURE
-  ACTIVE
+  SIGNED
+  VOID
 }
 
 enum LateFeeType {
@@ -501,6 +502,8 @@ model LeaseAddendum {
   documentHash  String?
   effectiveDate DateTime?
   status        LeaseAddendumStatus @default(DRAFT)
+  landlordSignedAt      DateTime?
+  landlordSignatureData Json?
   createdAt     DateTime            @default(now())
 
   // Relations

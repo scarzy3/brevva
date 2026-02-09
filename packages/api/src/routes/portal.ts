@@ -209,7 +209,7 @@ router.get(
               },
             },
             addendums: {
-              where: { status: "ACTIVE" },
+              where: { status: "SIGNED" },
               orderBy: { createdAt: "desc" },
             },
           },

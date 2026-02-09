@@ -419,6 +419,67 @@ export default function LeaseDetail() {
       setActionError(err?.data?.error ?? err?.message ?? "Failed to send addendum"),
   });
 
+  const deleteAddendum = useMutation({
+    mutationFn: (addendumId: string) =>
+      api(`/leases/${id}/addendums/${addendumId}`, { method: "DELETE" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["lease", id] });
+      setActionError(null);
+    },
+    onError: (err: any) =>
+      setActionError(err?.data?.error ?? err?.message ?? "Failed to delete addendum"),
+  });
+
+  const voidAddendum = useMutation({
+    mutationFn: (addendumId: string) =>
+      api(`/leases/${id}/addendums/${addendumId}/void`, { method: "POST" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["lease", id] });
+      setActionError(null);
+    },
+    onError: (err: any) =>
+      setActionError(err?.data?.error ?? err?.message ?? "Failed to void addendum"),
+  });
+
+  const resendAddendum = useMutation({
+    mutationFn: (addendumId: string) =>
+      api(`/leases/${id}/addendums/${addendumId}/resend`, { method: "POST" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["lease", id] });
+      setActionError(null);
+    },
+    onError: (err: any) =>
+      setActionError(err?.data?.error ?? err?.message ?? "Failed to resend addendum"),
+  });
+
+  const [showAddendumCountersignModal, setShowAddendumCountersignModal] = useState(false);
+  const [addendumCountersignId, setAddendumCountersignId] = useState<string | null>(null);
+  const [addendumCsFullName, setAddendumCsFullName] = useState("");
+  const [addendumCsSignatureImage, setAddendumCsSignatureImage] = useState<string | null>(null);
+
+  const countersignAddendum = useMutation({
+    mutationFn: (data: { addendumId: string; fullName: string; signatureImage?: string | null }) =>
+      api(`/leases/${id}/addendums/${data.addendumId}/countersign`, {
+        method: "POST",
+        body: JSON.stringify({
+          fullName: data.fullName,
+          ...(data.signatureImage ? { signatureImage: data.signatureImage } : {}),
+        }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["lease", id] });
+      setActionError(null);
+      setShowAddendumCountersignModal(false);
+      setAddendumCountersignId(null);
+      setAddendumCsFullName("");
+      setAddendumCsSignatureImage(null);
+    },
+    onError: (err: any) =>
+      setActionError(
+        err?.data?.error?.message ?? err?.data?.error ?? err?.message ?? "Failed to countersign addendum"
+      ),
+  });
+
   const handleUploadAddendum = async (sendForSig: boolean) => {
     if (!addendumFile || !addendumTitle.trim() || !addendumEffectiveDate) return;
     setAddendumSubmitting(true);
@@ -560,7 +621,12 @@ export default function LeaseDetail() {
     resendEmails.isPending ||
     countersign.isPending ||
     terminateLease.isPending ||
-    deleteLease.isPending;
+    deleteLease.isPending ||
+    sendAddendumForSignature.isPending ||
+    deleteAddendum.isPending ||
+    voidAddendum.isPending ||
+    resendAddendum.isPending ||
+    countersignAddendum.isPending;
 
   return (
     <div>
@@ -938,61 +1004,192 @@ export default function LeaseDetail() {
           {addendums.length === 0 ? (
             <p className="text-sm text-gray-400">No addendums</p>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {addendums.map((a: any) => (
                 <div
                   key={a.id}
-                  className="rounded-lg bg-gray-50 px-4 py-2.5"
+                  className="rounded-lg border bg-gray-50 px-4 py-3"
                 >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">
-                        {a.title}
-                      </p>
-                      <p className="text-xs text-gray-400">
-                        Added {fmtDate(a.createdAt)}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {a.title}
+                        </p>
+                        <span
+                          className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                            a.status === "SIGNED"
+                              ? "bg-green-100 text-green-700"
+                              : a.status === "PENDING_SIGNATURE"
+                                ? "bg-yellow-100 text-yellow-700"
+                                : a.status === "VOID"
+                                  ? "bg-red-100 text-red-600"
+                                  : "bg-gray-100 text-gray-600"
+                          }`}
+                        >
+                          {a.status === "PENDING_SIGNATURE"
+                            ? "Pending Signature"
+                            : a.status === "SIGNED"
+                              ? "Signed"
+                              : a.status === "VOID"
+                                ? "Void"
+                                : "Draft"}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-xs text-gray-400">
+                        Created {fmtDate(a.createdAt)}
                         {a.effectiveDate && ` · Effective ${fmtDate(a.effectiveDate)}`}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {a.status === "DRAFT" && (
+                  </div>
+
+                  {/* Action buttons based on status */}
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {/* DRAFT actions */}
+                    {a.status === "DRAFT" && (
+                      <>
+                        <Link
+                          to={`/leases/${id}/addendum/${a.id}/edit`}
+                          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-200"
+                        >
+                          <PenLine className="h-3 w-3" />
+                          Edit
+                        </Link>
                         <button
                           onClick={() => {
                             if (window.confirm("Send this addendum for signature to all tenants?")) {
                               sendAddendumForSignature.mutate(a.id);
                             }
                           }}
-                          disabled={sendAddendumForSignature.isPending}
+                          disabled={isMutating}
                           className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
                         >
                           <Send className="h-3 w-3" />
-                          Send
+                          Send for Signature
                         </button>
-                      )}
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                          a.status === "ACTIVE"
-                            ? "bg-green-100 text-green-700"
-                            : a.status === "PENDING_SIGNATURE"
-                              ? "bg-yellow-100 text-yellow-700"
-                              : "bg-gray-100 text-gray-600"
-                        }`}
-                      >
-                        {a.status === "PENDING_SIGNATURE" ? "Pending Signature" : a.status}
-                      </span>
-                    </div>
-                  </div>
-                  {a.documentUrl && (
-                    <div className="mt-2">
+                        <button
+                          onClick={() => {
+                            if (window.confirm("Delete this draft addendum?")) {
+                              deleteAddendum.mutate(a.id);
+                            }
+                          }}
+                          disabled={isMutating}
+                          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          Delete
+                        </button>
+                      </>
+                    )}
+
+                    {/* PENDING_SIGNATURE actions */}
+                    {a.status === "PENDING_SIGNATURE" && (
+                      <>
+                        <button
+                          onClick={() => {
+                            if (window.confirm("Resend signing emails to unsigned tenants?")) {
+                              resendAddendum.mutate(a.id);
+                            }
+                          }}
+                          disabled={isMutating}
+                          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                        >
+                          <RefreshCw className="h-3 w-3" />
+                          Resend
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (window.confirm("Void this addendum? This will cancel all pending signatures.")) {
+                              voidAddendum.mutate(a.id);
+                            }
+                          }}
+                          disabled={isMutating}
+                          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                        >
+                          <Ban className="h-3 w-3" />
+                          Void
+                        </button>
+                      </>
+                    )}
+
+                    {/* SIGNED actions */}
+                    {a.status === "SIGNED" && (
+                      <>
+                        {a.documentUrl && (
+                          <>
+                            <a
+                              href={a.documentUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              View Document
+                            </a>
+                            <a
+                              href={a.documentUrl}
+                              download
+                              className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-200"
+                            >
+                              <Download className="h-3 w-3" />
+                              Download
+                            </a>
+                          </>
+                        )}
+                        {!a.landlordSignedAt && (
+                          <button
+                            onClick={() => {
+                              setAddendumCountersignId(a.id);
+                              setShowAddendumCountersignModal(true);
+                            }}
+                            disabled={isMutating}
+                            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                          >
+                            <PenLine className="h-3 w-3" />
+                            Countersign
+                          </button>
+                        )}
+                      </>
+                    )}
+
+                    {/* VOID - show document link if available */}
+                    {a.status === "VOID" && a.documentUrl && (
                       <a
                         href={a.documentUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                        className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-gray-500 hover:bg-gray-200"
                       >
                         <ExternalLink className="h-3 w-3" />
                         View Document
                       </a>
+                    )}
+                  </div>
+
+                  {/* Signature status for PENDING_SIGNATURE */}
+                  {a.status === "PENDING_SIGNATURE" && a.signatures?.length > 0 && (
+                    <div className="mt-2 border-t pt-2">
+                      <p className="mb-1 text-xs font-medium text-gray-500">Signatures:</p>
+                      <div className="space-y-0.5">
+                        {a.signatures.map((sig: any) => (
+                          <div key={sig.id} className="flex items-center justify-between text-xs">
+                            <span className="text-gray-600">
+                              {sig.tenant?.firstName} {sig.tenant?.lastName}
+                            </span>
+                            {sig.signedAt ? (
+                              <span className="inline-flex items-center gap-0.5 text-green-700">
+                                <Check className="h-3 w-3" />
+                                Signed
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-0.5 text-amber-600">
+                                <Clock className="h-3 w-3" />
+                                Pending
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1208,6 +1405,132 @@ export default function LeaseDetail() {
                   className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {countersign.isPending ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Signing...
+                    </>
+                  ) : (
+                    <>
+                      <PenLine className="h-4 w-4" />
+                      Sign &amp; Finalize
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <p className="mt-4 text-center text-xs text-gray-400">
+              By signing, you acknowledge that this electronic signature
+              carries the same legal weight as a handwritten signature under
+              the ESIGN Act (15 U.S.C. &sect; 7001).
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Addendum Countersign Modal */}
+      {showAddendumCountersignModal && addendumCountersignId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">
+                Countersign Addendum
+              </h2>
+              <button
+                onClick={() => {
+                  setShowAddendumCountersignModal(false);
+                  setAddendumCountersignId(null);
+                  setAddendumCsFullName("");
+                  setAddendumCsSignatureImage(null);
+                }}
+                className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <p className="mt-2 text-sm text-gray-500">
+              As the landlord, sign below to finalize this addendum.
+              Your electronic signature carries the same legal weight as a
+              handwritten signature under the ESIGN Act.
+            </p>
+
+            <div className="mt-5 space-y-4">
+              <div>
+                <label
+                  htmlFor="addendumCsFullName"
+                  className="block text-sm font-medium text-gray-700"
+                >
+                  Full Legal Name
+                </label>
+                <input
+                  id="addendumCsFullName"
+                  type="text"
+                  value={addendumCsFullName}
+                  onChange={(e) => setAddendumCsFullName(e.target.value)}
+                  placeholder="Enter your full legal name"
+                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700">
+                  Your Signature
+                </label>
+                <SignaturePad
+                  fullName={addendumCsFullName}
+                  onSignatureReady={setAddendumCsSignatureImage}
+                />
+              </div>
+
+              <div className="rounded-lg bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                <span className="font-medium">Signing date:</span>{" "}
+                {new Date().toLocaleString("en-US", {
+                  year: "numeric",
+                  month: "long",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                  timeZoneName: "short",
+                })}
+              </div>
+
+              {actionError && (
+                <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+                  {actionError}
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowAddendumCountersignModal(false);
+                    setAddendumCountersignId(null);
+                    setAddendumCsFullName("");
+                    setAddendumCsSignatureImage(null);
+                    setActionError(null);
+                  }}
+                  className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (!addendumCsFullName.trim() || !addendumCsSignatureImage || !addendumCountersignId) return;
+                    countersignAddendum.mutate({
+                      addendumId: addendumCountersignId,
+                      fullName: addendumCsFullName.trim(),
+                      signatureImage: addendumCsSignatureImage,
+                    });
+                  }}
+                  disabled={
+                    !addendumCsFullName.trim() ||
+                    !addendumCsSignatureImage ||
+                    countersignAddendum.isPending
+                  }
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {countersignAddendum.isPending ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
                       Signing...
